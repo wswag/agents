@@ -20,6 +20,7 @@ type exportedAgentDefinition struct {
 	Name                 string                  `yaml:"name,omitempty"`
 	Version              string                  `yaml:"version,omitempty"`
 	Model                string                  `yaml:"model,omitempty"`
+	ReasoningEffort      string                  `yaml:"reasoning_effort,omitempty"`
 	DashboardCorrelation string                  `yaml:"dashboard_correlation,omitempty"`
 	ModelOptions         []ModelOption           `yaml:"model_options,omitempty"`
 	Tools                []Tool                  `yaml:"tools,omitempty"`
@@ -49,7 +50,7 @@ func validateFrontmatterKeyTemplate(frontmatter string) error {
 
 func (values exportedAgentOverrides) toAgent() (Agent, error) {
 	agent := Agent{
-		Key: values.Key, Name: values.Name, Version: values.Version, Model: values.Model,
+		Key: values.Key, Name: values.Name, Version: values.Version, Model: values.Model, ReasoningEffort: values.ReasoningEffort,
 		DashboardCorrelation: values.DashboardCorrelation, ModelOptions: values.ModelOptions,
 		Tools: values.Tools, Output: values.Output,
 	}
@@ -136,7 +137,7 @@ func ExportPromptBundle(agent Agent) (string, error) {
 	agent = mergeAgentDefinition(agent, frontmatter)
 	definition := exportedAgentDefinition{
 		Key: agent.Key, Name: agent.Name, Version: agent.Version, Model: agent.Model,
-		DashboardCorrelation: agent.DashboardCorrelation, ModelOptions: agent.ModelOptions,
+		DashboardCorrelation: agent.DashboardCorrelation, ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
 		Tools: agent.Tools, Output: agent.Output,
 	}
 	if agent.Image != (ImageOptions{}) {
@@ -203,7 +204,7 @@ func exportTemplatedFrontmatterBundle(agent Agent, rawFrontmatter string) (strin
 func agentToExportedDefinition(agent Agent) exportedAgentDefinition {
 	definition := exportedAgentDefinition{
 		Key: agent.Key, Name: agent.Name, Version: agent.Version, Model: agent.Model,
-		DashboardCorrelation: agent.DashboardCorrelation, ModelOptions: agent.ModelOptions,
+		DashboardCorrelation: agent.DashboardCorrelation, ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
 		Tools: agent.Tools, Output: agent.Output,
 	}
 	if agent.Image != (ImageOptions{}) {

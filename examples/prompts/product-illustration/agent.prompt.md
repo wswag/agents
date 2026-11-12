@@ -3,6 +3,7 @@ key: product-illustration
 name: Produktillustration
 version: v1
 model: gpt-5.6-luna
+reasoning_effort: medium
 output: image
 image:
   model: gpt-image-2.5-flare

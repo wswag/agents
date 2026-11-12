@@ -11,6 +11,7 @@ type Agent struct {
 	Name                 string
 	Version              string
 	Model                string
+	ReasoningEffort      string
 	DashboardCorrelation string
 	ModelOptions         []ModelOption
 	Tools                []Tool

@@ -222,6 +222,7 @@ key: product-illustration
 name: Produktillustration
 version: v1
 model: gpt-5.6-luna
+reasoning_effort: medium
 dashboard_correlation: product-illustration
 output: image
 image:
