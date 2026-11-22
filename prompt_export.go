@@ -108,6 +108,9 @@ func applyAgentOverrides(agent Agent, overrides Agent) Agent {
 	if overrides.Image.Quality != "" {
 		agent.Image.Quality = overrides.Image.Quality
 	}
+	if overrides.Image.OutputFormat != "" {
+		agent.Image.OutputFormat = overrides.Image.OutputFormat
+	}
 	if overrides.LoggingOptions != (LoggingOptions{}) {
 		agent.LoggingOptions = overrides.LoggingOptions
 	}

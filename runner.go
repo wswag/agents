@@ -302,6 +302,9 @@ func mergeAgentDefinition(explicit, frontmatter Agent) Agent {
 	if explicit.Image.Quality == "" {
 		explicit.Image.Quality = frontmatter.Image.Quality
 	}
+	if explicit.Image.OutputFormat == "" {
+		explicit.Image.OutputFormat = frontmatter.Image.OutputFormat
+	}
 	if explicit.LoggingOptions == (LoggingOptions{}) {
 		explicit.LoggingOptions = frontmatter.LoggingOptions
 	}
@@ -581,6 +584,22 @@ func (r *Runner) runImage(ctx context.Context, agent Agent, instructions, input 
 		quality = "low"
 	}
 	imageTool["quality"] = quality
+	format := agent.Image.OutputFormat
+	if format == "" {
+		format = "png"
+	}
+	var mimeType string
+	switch format {
+	case "png":
+		mimeType = "image/png"
+	case "jpeg":
+		mimeType = "image/jpeg"
+	case "webp":
+		mimeType = "image/webp"
+	default:
+		return Image{}, nil, fmt.Errorf("unbekanntes bildformat %q", format)
+	}
+	imageTool["output_format"] = format
 	request := map[string]any{
 		"model":        agent.Model,
 		"instructions": instructions,
@@ -609,7 +628,7 @@ func (r *Runner) runImage(ctx context.Context, agent Agent, instructions, input 
 				if err != nil {
 					return Image{}, nil, fmt.Errorf("agent bild dekodieren: %w", err)
 				}
-				return Image{MIMEType: "image/png", Data: data}, response, nil
+				return Image{MIMEType: mimeType, Data: data}, response, nil
 			}
 		}
 	}
