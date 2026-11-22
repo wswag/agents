@@ -278,6 +278,9 @@ func mergeAgentDefinition(explicit, frontmatter Agent) Agent {
 	if explicit.Model == "" || (isTemplateText(explicit.Model) && frontmatter.Model != "") {
 		explicit.Model = frontmatter.Model
 	}
+	if explicit.ReasoningEffort == "" || (isTemplateText(explicit.ReasoningEffort) && frontmatter.ReasoningEffort != "") {
+		explicit.ReasoningEffort = frontmatter.ReasoningEffort
+	}
 	if explicit.DashboardCorrelation == "" || (isTemplateText(explicit.DashboardCorrelation) && frontmatter.DashboardCorrelation != "") {
 		explicit.DashboardCorrelation = frontmatter.DashboardCorrelation
 	}
@@ -358,6 +361,7 @@ func parsePromptBundleInternal(source string, inputObject any, renderFrontmatter
 			Name                 string        `yaml:"name"`
 			Version              string        `yaml:"version"`
 			Model                string        `yaml:"model"`
+			ReasoningEffort      string        `yaml:"reasoning_effort"`
 			DashboardCorrelation string        `yaml:"dashboard_correlation"`
 			ModelOptions         []ModelOption `yaml:"model_options"`
 			Tools                []Tool        `yaml:"tools"`
@@ -386,7 +390,7 @@ func parsePromptBundleInternal(source string, inputObject any, renderFrontmatter
 			}
 			metadata = Agent{
 				Key: frontmatter.Key, Name: frontmatter.Name, Version: frontmatter.Version,
-				Model: frontmatter.Model, DashboardCorrelation: frontmatter.DashboardCorrelation,
+				Model: frontmatter.Model, ReasoningEffort: frontmatter.ReasoningEffort, DashboardCorrelation: frontmatter.DashboardCorrelation,
 				ModelOptions: frontmatter.ModelOptions, Tools: frontmatter.Tools,
 				Output: frontmatter.Output, Image: frontmatter.Image,
 				LoggingOptions: LoggingOptions{
