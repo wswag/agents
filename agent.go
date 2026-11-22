@@ -7,21 +7,23 @@ import (
 
 // Agent describes a reusable, specialized AI agent with a versioned definition.
 type Agent struct {
-	Key                  string
-	Name                 string
-	Version              string
-	Model                string
-	ReasoningEffort      string
-	DashboardCorrelation string
-	ModelOptions         []ModelOption
-	Tools                []Tool
-	SystemPrompt         string
-	InputTemplate        string
-	OutputSchema         string
-	Output               OutputType
-	Image                ImageOptions
-	LoggingOptions       LoggingOptions
-	PromptFiles          *PromptFiles
+	// PromptExecutorFactory is runtime-only and is not persisted in prompt bundles.
+	PromptExecutorFactory PromptExecutorFactory
+	Key                   string
+	Name                  string
+	Version               string
+	Model                 string
+	ReasoningEffort       string
+	DashboardCorrelation  string
+	ModelOptions          []ModelOption
+	Tools                 []Tool
+	SystemPrompt          string
+	InputTemplate         string
+	OutputSchema          string
+	Output                OutputType
+	Image                 ImageOptions
+	LoggingOptions        LoggingOptions
+	PromptFiles           *PromptFiles
 }
 
 // LoggingOptions controls which parts of an agent run are persisted.

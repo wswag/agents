@@ -99,6 +99,22 @@ logging_options:
 
 ## Registry
 
+### PromptExecutor
+
+Ein Agent kann mit `PromptExecutorFactory` einen eigenen `PromptExecutor` registrieren. Die Factory erhält den Runner und die aufgelöste Agentdefinition. Ohne Factory wird ein Executor verwendet, der `Runner.Run` aufruft und Antworten als JSON parst. Factory-Funktionen sind nur zur Laufzeit verfügbar und werden nicht im Repository gespeichert.
+
+```go
+executor, err := registry.PromptExecutor(ctx, "blog-content")
+if err != nil { return err }
+raw, err := executor.ExecutePrompt(ctx, input, agents.RunOptions{PreviousResponseID: previousID})
+if err != nil { return err }
+var output MyOutput
+if err := executor.ParseResponse(raw, &output); err != nil { return err }
+fmt.Println(raw.Usage.TotalTokens, raw.ResponseID)
+```
+
+Alternativ löst `runner.PromptExecutor(ctx, registry, key)` den Executor auf. Eigene Implementierungen können `Runner.Run` für die Ausführung und die vorhandenen Response- und Token-Metadaten verwenden und das Parsing selbst bestimmen.
+
 Agentdefinitionen lassen sich über ihren Key registrieren und später abrufen:
 
 ```go
