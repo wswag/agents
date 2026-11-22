@@ -206,7 +206,7 @@ result, err := runner.Run(ctx, photoAgent, PhotoContext{
 })
 ```
 
-Bildagenten können `Image.Model`, `Image.Size` und `Image.Quality` in ihrer Definition festlegen. Ohne Qualitätsangabe wird `low` verwendet. Ohne Modellüberschreibung nutzt das Modul `agents.DefaultImageModel` (`gpt-image-2.5-flare`).
+Bildagenten können `Image.Model`, `Image.Size`, `Image.Quality` und `Image.OutputFormat` in ihrer Definition festlegen. Als Ausgabeformat sind `png`, `jpeg` und `webp` möglich; Standard ist `png`. Ohne Qualitätsangabe wird `low` verwendet. Ohne Modellüberschreibung nutzt das Modul `agents.DefaultImageModel` (`gpt-image-2.5-flare`).
 
 Eine vollständige Definition für eine Produktillustration steht in `examples.ProductIllustrationAgent()`. Sie kann beispielsweise so ausgeführt werden:
 
@@ -245,6 +245,7 @@ image:
   model: gpt-image-2.5-flare
   size: 1024x1024
   quality: high
+  output_format: jpeg
 ---
 '''system-prompt
 Erzeuge eine schlichte Produktillustration.

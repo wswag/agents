@@ -56,9 +56,10 @@ const (
 
 // ImageOptions configures image generation for agents with OutputImage or OutputBoth.
 type ImageOptions struct {
-	Model   string
-	Size    string
-	Quality string
+	Model        string
+	Size         string
+	Quality      string
+	OutputFormat string `yaml:"output_format,omitempty"`
 }
 
 // ModelOption beschreibt ein vom Betreiber explizit freigegebenes Modell.
