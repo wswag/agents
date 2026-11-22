@@ -7,6 +7,7 @@ import (
 
 // Agent describes a reusable, specialized AI agent with a versioned definition.
 type Agent struct {
+	PromptGuard PromptGuard
 	// PromptExecutorFactory is runtime-only and is not persisted in prompt bundles.
 	PromptExecutorFactory PromptExecutorFactory
 	Key                   string

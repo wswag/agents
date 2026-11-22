@@ -186,6 +186,9 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 	if err != nil {
 		return Result{}, err
 	}
+	if guard := effectivePromptGuard(agent.PromptGuard); guard != "" {
+		instructions += "\n\n" + string(guard) + "\n\n" + promptGuardBlockSpecification
+	}
 	images := collectImages(reflect.ValueOf(inputObject))
 	result := Result{PreviousResponseID: runOptions.PreviousResponseID, DashboardCorrelation: dashboardCorrelation}
 	if agent.Output == OutputText || agent.Output == OutputBoth {
@@ -195,6 +198,11 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 		}
 		result.Text = text
 		result.addResponse(response, runOptions.PreviousResponseID, dashboardCorrelation)
+		if effectivePromptGuard(agent.PromptGuard) != "" {
+			if err := checkPromptBlock(result); err != nil {
+				return result, err
+			}
+		}
 	}
 	if agent.Output == OutputImage || agent.Output == OutputBoth {
 		image, response, err := r.runImage(ctx, agent, instructions, input, images, runOptions, dashboardCorrelation)
@@ -266,6 +274,9 @@ func resolveAgentPromptsInternal(agent Agent, inputObject any, renderFrontmatter
 }
 
 func mergeAgentDefinition(explicit, frontmatter Agent) Agent {
+	if explicit.PromptGuard == "" {
+		explicit.PromptGuard = frontmatter.PromptGuard
+	}
 	if explicit.Key == "" {
 		explicit.Key = frontmatter.Key
 	}
@@ -363,6 +374,7 @@ func parsePromptBundleInternal(source string, inputObject any, renderFrontmatter
 		decoder := yaml.NewDecoder(strings.NewReader(frontmatterText))
 		decoder.KnownFields(true)
 		var frontmatter struct {
+			PromptGuard          PromptGuard   `yaml:"prompt_guard"`
 			Key                  string        `yaml:"key"`
 			Name                 string        `yaml:"name"`
 			Version              string        `yaml:"version"`
@@ -395,7 +407,8 @@ func parsePromptBundleInternal(source string, inputObject any, renderFrontmatter
 				}
 			}
 			metadata = Agent{
-				Key: frontmatter.Key, Name: frontmatter.Name, Version: frontmatter.Version,
+				PromptGuard: frontmatter.PromptGuard,
+				Key:         frontmatter.Key, Name: frontmatter.Name, Version: frontmatter.Version,
 				Model: frontmatter.Model, ReasoningEffort: frontmatter.ReasoningEffort, DashboardCorrelation: frontmatter.DashboardCorrelation,
 				ModelOptions: frontmatter.ModelOptions, Tools: frontmatter.Tools,
 				Output: frontmatter.Output, Image: frontmatter.Image,
