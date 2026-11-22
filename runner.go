@@ -299,6 +299,9 @@ func mergeAgentDefinition(explicit, frontmatter Agent) Agent {
 	if explicit.Image.Size == "" {
 		explicit.Image.Size = frontmatter.Image.Size
 	}
+	if explicit.Image.Quality == "" {
+		explicit.Image.Quality = frontmatter.Image.Quality
+	}
 	if explicit.LoggingOptions == (LoggingOptions{}) {
 		explicit.LoggingOptions = frontmatter.LoggingOptions
 	}
@@ -572,11 +575,17 @@ func (r *Runner) runImage(ctx context.Context, agent Agent, instructions, input 
 			Detail: responses.ResponseInputImageDetailAuto, ImageURL: openai.String(dataURL),
 		}})
 	}
+	imageTool := map[string]any{"type": "image_generation", "model": imageModel, "size": size}
+	quality := agent.Image.Quality
+	if quality == "" {
+		quality = "low"
+	}
+	imageTool["quality"] = quality
 	request := map[string]any{
 		"model":        agent.Model,
 		"instructions": instructions,
 		"input":        []any{map[string]any{"role": "user", "content": content}},
-		"tools":        []any{map[string]any{"type": "image_generation", "model": imageModel, "size": size}},
+		"tools":        []any{imageTool},
 		"store":        false,
 	}
 	addRunOptions(request, options, agent, dashboardCorrelation)

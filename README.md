@@ -206,7 +206,7 @@ result, err := runner.Run(ctx, photoAgent, PhotoContext{
 })
 ```
 
-Bildagenten können `Image.Model` und `Image.Size` in ihrer Definition festlegen. Ohne Überschreibung nutzt das Modul `agents.DefaultImageModel` (`gpt-image-2.5-flare`).
+Bildagenten können `Image.Model`, `Image.Size` und `Image.Quality` in ihrer Definition festlegen. Ohne Qualitätsangabe wird `low` verwendet. Ohne Modellüberschreibung nutzt das Modul `agents.DefaultImageModel` (`gpt-image-2.5-flare`).
 
 Eine vollständige Definition für eine Produktillustration steht in `examples.ProductIllustrationAgent()`. Sie kann beispielsweise so ausgeführt werden:
 
@@ -244,6 +244,7 @@ output: image
 image:
   model: gpt-image-2.5-flare
   size: 1024x1024
+  quality: high
 ---
 '''system-prompt
 Erzeuge eine schlichte Produktillustration.

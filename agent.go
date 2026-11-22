@@ -56,8 +56,9 @@ const (
 
 // ImageOptions configures image generation for agents with OutputImage or OutputBoth.
 type ImageOptions struct {
-	Model string
-	Size  string
+	Model   string
+	Size    string
+	Quality string
 }
 
 // ModelOption beschreibt ein vom Betreiber explizit freigegebenes Modell.
