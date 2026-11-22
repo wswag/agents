@@ -38,6 +38,8 @@ Standardmäßig verwendet jeder Agent `GuardBlockSuspicious`: Sachfremde Eingabe
 
 Bei aktivem Guard ergänzt der Runner eine feste JSON-Spezifikation für Blockierungen. Wird ein solcher Datensatz als Textantwort erkannt, liefern `Run` und `ExecutePrompt` die Rohantwort zusammen mit einem `*agents.PromptBlockedError` mit `Reason` und `Confidence` (Modellsicherheit zwischen 0 und 1). Auch `ParseResponse` prüft vor dem Aufruf eines eigenen Parsers auf diesen Datensatz. Eigene Executor müssen zur Injektion des Guards `Runner.Run` verwenden oder die entsprechenden Anweisungen selbst in ihre Modellanfrage aufnehmen. Bei reiner Bildausgabe gibt es keine Textantwort, aus der ein Block-Datensatz ausgelesen werden kann. Der Guard ist eine Modellanweisung und garantiert keine Erkennung jeder bösartigen Eingabe.
 
+Bei aktivem Guard steht vor der unveränderten gerenderten Eingabe die Markierung `<untrusted_input>`. Der Systemprompt kennzeichnet alles ab der ersten Markierung bis zum Ende der Nutzernachricht sowie mitgelieferte Bilder als nicht vertrauenswürdig. Werte, die direkt in `SystemPrompt`, `OutputSchema` oder das Frontmatter interpoliert werden, befinden sich außerhalb dieser Abgrenzung und dürfen daher keine nicht vertrauenswürdigen Daten enthalten. Bei `GuardNone` bleibt die Eingabe unverändert.
+
 Mit `agents.CheckOpenAIHealth(ctx, nil)` lässt sich der veröffentlichte Status der Responses API abrufen. Das Ergebnis enthält `Status` und `Operational`; ein Fehler bedeutet, dass der Status nicht abgerufen oder ausgewertet werden konnte. Der Check prüft weder Zugangsdaten noch die Erreichbarkeit eines bestimmten Modells. Optional kann ein eigener HTTP-Client übergeben werden.
 
 ```go

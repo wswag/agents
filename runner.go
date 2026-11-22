@@ -187,7 +187,10 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 		return Result{}, err
 	}
 	if guard := effectivePromptGuard(agent.PromptGuard); guard != "" {
-		instructions += "\n\n" + string(guard) + "\n\n" + promptGuardBlockSpecification
+		instructions += "\n\n" + promptGuardInputSpecification + "\n\n" + string(guard) + "\n\n" + promptGuardBlockSpecification
+		if input != "" {
+			input = fenceUntrustedInput(input)
+		}
 	}
 	images := collectImages(reflect.ValueOf(inputObject))
 	result := Result{PreviousResponseID: runOptions.PreviousResponseID, DashboardCorrelation: dashboardCorrelation}
