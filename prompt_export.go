@@ -16,6 +16,7 @@ type exportedLoggingOptions struct {
 }
 
 type exportedAgentDefinition struct {
+	PromptGuard          PromptGuard             `yaml:"prompt_guard,omitempty"`
 	Key                  string                  `yaml:"key,omitempty"`
 	Name                 string                  `yaml:"name,omitempty"`
 	Version              string                  `yaml:"version,omitempty"`
@@ -50,7 +51,8 @@ func validateFrontmatterKeyTemplate(frontmatter string) error {
 
 func (values exportedAgentOverrides) toAgent() (Agent, error) {
 	agent := Agent{
-		Key: values.Key, Name: values.Name, Version: values.Version, Model: values.Model, ReasoningEffort: values.ReasoningEffort,
+		PromptGuard: values.PromptGuard,
+		Key:         values.Key, Name: values.Name, Version: values.Version, Model: values.Model, ReasoningEffort: values.ReasoningEffort,
 		DashboardCorrelation: values.DashboardCorrelation, ModelOptions: values.ModelOptions,
 		Tools: values.Tools, Output: values.Output,
 	}
@@ -75,6 +77,9 @@ func (values exportedAgentOverrides) toAgent() (Agent, error) {
 }
 
 func applyAgentOverrides(agent Agent, overrides Agent) Agent {
+	if overrides.PromptGuard != "" {
+		agent.PromptGuard = overrides.PromptGuard
+	}
 	if overrides.Key != "" {
 		agent.Key = overrides.Key
 	}
@@ -142,7 +147,8 @@ func ExportPromptBundle(agent Agent) (string, error) {
 	}
 	agent = mergeAgentDefinition(agent, frontmatter)
 	definition := exportedAgentDefinition{
-		Key: agent.Key, Name: agent.Name, Version: agent.Version, Model: agent.Model,
+		PromptGuard: agent.PromptGuard,
+		Key:         agent.Key, Name: agent.Name, Version: agent.Version, Model: agent.Model,
 		DashboardCorrelation: agent.DashboardCorrelation, ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
 		Tools: agent.Tools, Output: agent.Output,
 	}
@@ -209,7 +215,8 @@ func exportTemplatedFrontmatterBundle(agent Agent, rawFrontmatter string) (strin
 
 func agentToExportedDefinition(agent Agent) exportedAgentDefinition {
 	definition := exportedAgentDefinition{
-		Key: agent.Key, Name: agent.Name, Version: agent.Version, Model: agent.Model,
+		PromptGuard: agent.PromptGuard,
+		Key:         agent.Key, Name: agent.Name, Version: agent.Version, Model: agent.Model,
 		DashboardCorrelation: agent.DashboardCorrelation, ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
 		Tools: agent.Tools, Output: agent.Output,
 	}

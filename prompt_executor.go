@@ -51,9 +51,9 @@ func (r *Runner) PromptExecutor(ctx context.Context, registry *Registry, key str
 		if executor == nil {
 			return nil, fmt.Errorf("agent %q executor factory returned nil", key)
 		}
-		return executor, nil
+		return guardedPromptExecutor{inner: executor, enabled: effectivePromptGuard(agent.PromptGuard) != ""}, nil
 	}
-	return DefaultPromptExecutor{Runner: r, Agent: agent}, nil
+	return guardedPromptExecutor{inner: DefaultPromptExecutor{Runner: r, Agent: agent}, enabled: effectivePromptGuard(agent.PromptGuard) != ""}, nil
 }
 
 // PromptExecutor resolves an executor using the runner configured on the registry.
