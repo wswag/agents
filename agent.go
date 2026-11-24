@@ -57,9 +57,12 @@ const (
 
 // ImageOptions configures image generation for agents with OutputImage or OutputBoth.
 type ImageOptions struct {
-	Model        string
-	Size         string
-	Quality      string
+	Provider string         `yaml:"provider,omitempty"`
+	Model    string         `yaml:"model,omitempty"`
+	Options  map[string]any `yaml:"options,omitempty"`
+	// Legacy OpenAI options remain supported and are merged into Options.
+	Size         string `yaml:"size,omitempty"`
+	Quality      string `yaml:"quality,omitempty"`
 	OutputFormat string `yaml:"output_format,omitempty"`
 }
 

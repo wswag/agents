@@ -65,7 +65,7 @@ fmt.Println("tokens:", result.Usage.TotalTokens, "cached:", result.Usage.CachedT
 ```
 
 Vorlagen greifen direkt auf das Eingabeobjekt zu, zum Beispiel mit `{{.Topic}}`. Fehlende Template-Werte werden als Fehler gemeldet.
-`RunOptions` ist optional. `DashboardCorrelation` wird standardmäßig aus `Agent.Key` abgeleitet und kann in der Agentdefinition, im Eingabeobjekt oder in den Optionen überschrieben werden. Der Wert wird als `prompt_cache_key` und als Response-Metadatum gesendet; Key und Version des Agenten werden ebenfalls als Metadaten übermittelt. Zusätzliche string-basierte Metadaten lassen sich pro Lauf über `RunOptions.Metadata` übergeben und werden mit diesen Agent-Metadaten zusammengeführt. Die reservierten Metadaten-Keys `agent_key`, `agent_version` und `dashboard_correlation` werden dabei aus der Agentdefinition bzw. den Optionen gesetzt. `PreviousResponseID` setzt den Gesprächsbezug, `ModelOverride` überschreibt das Sprachmodell für diesen Lauf. `Result` gibt die Response-ID(s), `DashboardCorrelation` und Token-Nutzungsdaten (`Usage`) zurück.
+`RunOptions` ist optional. Textläufe verwenden standardmäßig Chat Completions. Für eine Responses-Sitzung, auch beim ersten Aufruf ohne Response-ID, setze `ConversationMode: agents.ConversationModeResponses`; weitere Aufrufe können zusätzlich `PreviousResponseID` übergeben. Ist `PreviousResponseID` gesetzt, wird Responses automatisch gewählt. `DashboardCorrelation` wird standardmäßig aus `Agent.Key` abgeleitet. `ModelOverride` überschreibt das Sprachmodell. `Result` gibt IDs und Token-Nutzungsdaten zurück.
 
 ## Run-Logging
 
@@ -217,6 +217,17 @@ result, err := runner.Run(ctx, photoAgent, PhotoContext{
 ```
 
 Bildagenten können `Image.Model`, `Image.Size`, `Image.Quality` und `Image.OutputFormat` in ihrer Definition festlegen. Als Ausgabeformat sind `png`, `jpeg` und `webp` möglich; Standard ist `png`. Ohne Qualitätsangabe wird `low` verwendet. Ohne Modellüberschreibung nutzt das Modul `agents.DefaultImageModel` (`gpt-image-2.5-flare`).
+
+Bildprovider implementieren `ImageProvider` und werden mit `Runner.RegisterImageProvider` registriert. Provider verwalten ihre Zugangsdaten selbst. BFL lässt sich beispielsweise mit `agents.BFLImageProvider{APIKey: os.Getenv("BFL_API_KEY")}` registrieren; in der Definition stehen Provider, Modell und modellbezogene Optionen unter `image`:
+
+```yaml
+image:
+  provider: bfl
+  model: flux-2-pro
+  options:
+    width: 1024
+    height: 1024
+```
 
 Eine vollständige Definition für eine Produktillustration steht in `examples.ProductIllustrationAgent()`. Sie kann beispielsweise so ausgeführt werden:
 

@@ -104,8 +104,14 @@ func applyAgentOverrides(agent Agent, overrides Agent) Agent {
 	if overrides.Output != "" {
 		agent.Output = overrides.Output
 	}
+	if overrides.Image.Provider != "" {
+		agent.Image.Provider = overrides.Image.Provider
+	}
 	if overrides.Image.Model != "" {
 		agent.Image.Model = overrides.Image.Model
+	}
+	if overrides.Image.Options != nil {
+		agent.Image.Options = overrides.Image.Options
 	}
 	if overrides.Image.Size != "" {
 		agent.Image.Size = overrides.Image.Size
@@ -152,7 +158,7 @@ func ExportPromptBundle(agent Agent) (string, error) {
 		DashboardCorrelation: agent.DashboardCorrelation, ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
 		Tools: agent.Tools, Output: agent.Output,
 	}
-	if agent.Image != (ImageOptions{}) {
+	if !imageOptionsEmpty(agent.Image) {
 		definition.Image = &agent.Image
 	}
 	if agent.LoggingOptions != (LoggingOptions{}) {
@@ -220,7 +226,7 @@ func agentToExportedDefinition(agent Agent) exportedAgentDefinition {
 		DashboardCorrelation: agent.DashboardCorrelation, ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
 		Tools: agent.Tools, Output: agent.Output,
 	}
-	if agent.Image != (ImageOptions{}) {
+	if !imageOptionsEmpty(agent.Image) {
 		definition.Image = &agent.Image
 	}
 	if agent.LoggingOptions != (LoggingOptions{}) {
@@ -234,6 +240,10 @@ func agentToExportedDefinition(agent Agent) exportedAgentDefinition {
 		definition.LoggingOptions = logging
 	}
 	return definition
+}
+
+func imageOptionsEmpty(options ImageOptions) bool {
+	return options.Provider == "" && options.Model == "" && len(options.Options) == 0 && options.Size == "" && options.Quality == "" && options.OutputFormat == ""
 }
 
 func readAgentBundleSource(agent Agent) (string, bool, error) {

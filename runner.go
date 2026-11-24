@@ -30,8 +30,10 @@ type RunnerConfig struct {
 
 // Runner executes code-defined agents through the configured provider.
 type Runner struct {
-	client *openai.Client
-	logger RunLogger
+	client         *openai.Client
+	logger         RunLogger
+	httpClient     *http.Client
+	imageProviders map[string]ImageProvider
 }
 
 // ImageInput lets a parameter or context object include an image for visual tasks.
@@ -68,12 +70,20 @@ type ResponseMetadata struct {
 
 // RunOptions carries request-level cache and conversation state.
 type RunOptions struct {
+	ConversationMode     ConversationMode
 	DashboardCorrelation string
 	PreviousResponseID   string
 	ModelOverride        string
 	AgentVersion         string
 	Metadata             map[string]string
 }
+
+type ConversationMode string
+
+const (
+	ConversationModeChatCompletions ConversationMode = "chat_completions"
+	ConversationModeResponses       ConversationMode = "responses"
+)
 
 // TokenUsage summarizes token counts returned by Responses API calls.
 type TokenUsage struct {
@@ -101,7 +111,9 @@ func NewRunner(config RunnerConfig) *Runner {
 		baseURL = strings.TrimSuffix(baseURL, "/responses")
 	}
 	client := openai.NewClient(option.WithAPIKey(config.APIKey), option.WithBaseURL(baseURL), option.WithHTTPClient(httpClient))
-	return &Runner{client: &client, logger: config.Logger}
+	runner := &Runner{client: &client, logger: config.Logger, httpClient: httpClient, imageProviders: make(map[string]ImageProvider)}
+	_ = runner.RegisterImageProvider("openai", openAIImageProvider{runner: runner})
+	return runner
 }
 
 // Run renders the agent templates directly from the input object, then executes the agent.
@@ -195,12 +207,12 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 	images := collectImages(reflect.ValueOf(inputObject))
 	result := Result{PreviousResponseID: runOptions.PreviousResponseID, DashboardCorrelation: dashboardCorrelation}
 	if agent.Output == OutputText || agent.Output == OutputBoth {
-		text, response, err := r.runText(ctx, agent, instructions, input, images, runOptions, dashboardCorrelation)
+		text, metadata, err := r.runText(ctx, agent, instructions, input, images, runOptions, dashboardCorrelation)
 		if err != nil {
 			return Result{}, err
 		}
 		result.Text = text
-		result.addResponse(response, runOptions.PreviousResponseID, dashboardCorrelation)
+		result.addMetadata(metadata)
 		if effectivePromptGuard(agent.PromptGuard) != "" {
 			if err := checkPromptBlock(result); err != nil {
 				return result, err
@@ -213,7 +225,7 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 			return Result{}, err
 		}
 		result.Images = []Image{image}
-		result.addResponse(response, runOptions.PreviousResponseID, dashboardCorrelation)
+		result.addMetadata(responseMetadataFromResponse(response, runOptions.PreviousResponseID, dashboardCorrelation))
 	}
 	return result, nil
 }
@@ -309,6 +321,12 @@ func mergeAgentDefinition(explicit, frontmatter Agent) Agent {
 	}
 	if explicit.Image.Model == "" {
 		explicit.Image.Model = frontmatter.Image.Model
+	}
+	if explicit.Image.Provider == "" {
+		explicit.Image.Provider = frontmatter.Image.Provider
+	}
+	if explicit.Image.Options == nil {
+		explicit.Image.Options = frontmatter.Image.Options
 	}
 	if explicit.Image.Size == "" {
 		explicit.Image.Size = frontmatter.Image.Size
@@ -487,25 +505,25 @@ func parsePromptBundleInternal(source string, inputObject any, renderFrontmatter
 	return sections, metadata, nil
 }
 
-func (r *Result) addResponse(response *responses.Response, previousResponseID string, dashboardCorrelation string) {
-	if response == nil {
-		return
+func (r *Result) addMetadata(metadata ResponseMetadata) {
+	if metadata.ID != "" {
+		r.ResponseID = metadata.ID
+		r.ResponseIDs = append(r.ResponseIDs, metadata.ID)
 	}
-	r.ResponseID = response.ID
-	r.ResponseIDs = append(r.ResponseIDs, response.ID)
-	usage := TokenUsage{
-		InputTokens:      response.Usage.InputTokens,
-		CachedTokens:     response.Usage.InputTokensDetails.CachedTokens,
-		CacheWriteTokens: response.Usage.InputTokensDetails.CacheWriteTokens,
-		OutputTokens:     response.Usage.OutputTokens,
-		TotalTokens:      response.Usage.TotalTokens,
-	}
-	r.Responses = append(r.Responses, ResponseMetadata{ID: response.ID, PreviousResponseID: previousResponseID, DashboardCorrelation: dashboardCorrelation, Usage: usage})
+	r.Responses = append(r.Responses, metadata)
+	usage := metadata.Usage
 	r.Usage.InputTokens += usage.InputTokens
 	r.Usage.CachedTokens += usage.CachedTokens
 	r.Usage.CacheWriteTokens += usage.CacheWriteTokens
 	r.Usage.OutputTokens += usage.OutputTokens
 	r.Usage.TotalTokens += usage.TotalTokens
+}
+
+func responseMetadataFromResponse(response *responses.Response, previousResponseID, dashboardCorrelation string) ResponseMetadata {
+	if response == nil {
+		return ResponseMetadata{}
+	}
+	return ResponseMetadata{ID: response.ID, PreviousResponseID: previousResponseID, DashboardCorrelation: dashboardCorrelation, Usage: TokenUsage{InputTokens: response.Usage.InputTokens, CachedTokens: response.Usage.InputTokensDetails.CachedTokens, CacheWriteTokens: response.Usage.InputTokensDetails.CacheWriteTokens, OutputTokens: response.Usage.OutputTokens, TotalTokens: response.Usage.TotalTokens}}
 }
 
 func renderAgentTemplate(name, source string, inputObject any) (string, error) {
@@ -520,9 +538,66 @@ func renderAgentTemplate(name, source string, inputObject any) (string, error) {
 	return strings.TrimSpace(rendered.String()), nil
 }
 
-func (r *Runner) runText(ctx context.Context, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (string, *responses.Response, error) {
+func (r *Runner) runText(ctx context.Context, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (string, ResponseMetadata, error) {
+	mode := options.ConversationMode
+	if mode == "" {
+		mode = ConversationModeChatCompletions
+	}
+	if options.PreviousResponseID != "" {
+		mode = ConversationModeResponses
+	}
+	if mode != ConversationModeChatCompletions && mode != ConversationModeResponses {
+		return "", ResponseMetadata{}, fmt.Errorf("unbekannter conversation mode %q", mode)
+	}
+	if mode == ConversationModeResponses {
+		return r.runTextResponses(ctx, agent, instructions, input, images, options, dashboardCorrelation)
+	}
 	if input == "" && len(images) == 0 {
-		return "", nil, errors.New("agent input ist leer")
+		return "", ResponseMetadata{}, errors.New("agent input ist leer")
+	}
+	content := []any{}
+	if input != "" {
+		content = append(content, map[string]any{"type": "text", "text": input})
+	}
+	for _, image := range images {
+		if len(image.Data) == 0 || strings.TrimSpace(image.MIMEType) == "" {
+			return "", ResponseMetadata{}, errors.New("agent image input benötigt MIMEType und Data")
+		}
+		dataURL := "data:" + image.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)
+		content = append(content, map[string]any{"type": "image_url", "image_url": map[string]string{"url": dataURL}})
+	}
+	messages := []any{map[string]any{"role": "system", "content": instructions}, map[string]any{"role": "user", "content": content}}
+	request := map[string]any{"model": agent.Model, "messages": messages}
+	addChatRunOptions(request, agent, dashboardCorrelation)
+	if len(agent.Tools) > 0 {
+		request["tools"] = agent.Tools
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		return "", ResponseMetadata{}, fmt.Errorf("agent request serialisieren: %w", err)
+	}
+	var params openai.ChatCompletionNewParams
+	if err := json.Unmarshal(body, &params); err != nil {
+		return "", ResponseMetadata{}, fmt.Errorf("agent request in SDK-parameter umwandeln: %w", err)
+	}
+	response, err := r.client.Chat.Completions.New(ctx, params)
+	if err != nil {
+		return "", ResponseMetadata{}, fmt.Errorf("agent %q ausführen: %w", agent.Key, err)
+	}
+	text := ""
+	if len(response.Choices) > 0 {
+		text = strings.TrimSpace(response.Choices[0].Message.Content)
+	}
+	if text == "" {
+		return "", ResponseMetadata{}, fmt.Errorf("agent %q lieferte keinen text", agent.Key)
+	}
+	usage := TokenUsage{InputTokens: response.Usage.PromptTokens, OutputTokens: response.Usage.CompletionTokens, TotalTokens: response.Usage.TotalTokens}
+	return text, ResponseMetadata{ID: response.ID, DashboardCorrelation: dashboardCorrelation, Usage: usage}, nil
+}
+
+func (r *Runner) runTextResponses(ctx context.Context, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (string, ResponseMetadata, error) {
+	if input == "" && len(images) == 0 {
+		return "", ResponseMetadata{}, errors.New("agent input ist leer")
 	}
 	content := make([]responses.ResponseInputContentUnionParam, 0, len(images)+1)
 	if input != "" {
@@ -530,53 +605,92 @@ func (r *Runner) runText(ctx context.Context, agent Agent, instructions, input s
 	}
 	for _, image := range images {
 		if len(image.Data) == 0 || strings.TrimSpace(image.MIMEType) == "" {
-			return "", nil, errors.New("agent image input benötigt MIMEType und Data")
+			return "", ResponseMetadata{}, errors.New("agent image input benötigt MIMEType und Data")
 		}
-		dataURL := "data:" + image.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)
-		content = append(content, responses.ResponseInputContentUnionParam{OfInputImage: &responses.ResponseInputImageParam{
-			Detail:   responses.ResponseInputImageDetailAuto,
-			ImageURL: openai.String(dataURL),
-		}})
+		url := "data:" + image.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)
+		content = append(content, responses.ResponseInputContentUnionParam{OfInputImage: &responses.ResponseInputImageParam{Detail: responses.ResponseInputImageDetailAuto, ImageURL: openai.String(url)}})
 	}
-	request := map[string]any{
-		"model":        agent.Model,
-		"instructions": instructions,
-		"input":        []any{map[string]any{"role": "user", "content": content}},
-		"store":        false,
-	}
+	request := map[string]any{"model": agent.Model, "instructions": instructions, "input": []any{map[string]any{"role": "user", "content": content}}, "store": false}
 	addRunOptions(request, options, agent, dashboardCorrelation)
 	if len(agent.Tools) > 0 {
 		request["tools"] = agent.Tools
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
-		return "", nil, fmt.Errorf("agent request serialisieren: %w", err)
+		return "", ResponseMetadata{}, err
 	}
 	var params responses.ResponseNewParams
-	if err := json.Unmarshal(body, &params); err != nil {
-		return "", nil, fmt.Errorf("agent request in SDK-parameter umwandeln: %w", err)
+	if err = json.Unmarshal(body, &params); err != nil {
+		return "", ResponseMetadata{}, err
 	}
 	response, err := r.client.Responses.New(ctx, params)
 	if err != nil {
-		return "", nil, fmt.Errorf("agent %q ausführen: %w", agent.Key, err)
+		return "", ResponseMetadata{}, fmt.Errorf("agent %q ausführen: %w", agent.Key, err)
 	}
 	text := strings.TrimSpace(response.OutputText())
 	if text == "" {
-		return "", nil, fmt.Errorf("agent %q lieferte keinen text", agent.Key)
+		return "", ResponseMetadata{}, fmt.Errorf("agent %q lieferte keinen text", agent.Key)
 	}
-	return text, response, nil
+	usage := TokenUsage{InputTokens: response.Usage.InputTokens, CachedTokens: response.Usage.InputTokensDetails.CachedTokens, CacheWriteTokens: response.Usage.InputTokensDetails.CacheWriteTokens, OutputTokens: response.Usage.OutputTokens, TotalTokens: response.Usage.TotalTokens}
+	return text, ResponseMetadata{ID: response.ID, PreviousResponseID: options.PreviousResponseID, DashboardCorrelation: dashboardCorrelation, Usage: usage}, nil
+}
+
+func addChatRunOptions(request map[string]any, agent Agent, dashboardCorrelation string) {
+	metadata := map[string]string{}
+	if agent.Key != "" {
+		metadata["agent_key"] = agent.Key
+	}
+	if agent.Version != "" {
+		metadata["agent_version"] = agent.Version
+	}
+	if dashboardCorrelation != "" {
+		metadata["dashboard_correlation"] = dashboardCorrelation
+		request["prompt_cache_key"] = dashboardCorrelation
+	}
+	if len(metadata) > 0 {
+		request["metadata"] = metadata
+	}
 }
 
 func (r *Runner) runImage(ctx context.Context, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (Image, *responses.Response, error) {
+	provider := agent.Image.Provider
+	if provider == "" {
+		provider = "openai"
+	}
 	prompt := strings.TrimSpace(instructions + "\n\n" + input)
 	if prompt == "" {
 		return Image{}, nil, errors.New("agent image prompt ist leer")
 	}
+	imageProvider := r.imageProviders[provider]
+	if imageProvider == nil {
+		return Image{}, nil, fmt.Errorf("unbekannter image provider %q", provider)
+	}
+	if provider != "openai" {
+		image, err := imageProvider.GenerateImage(ctx, prompt, agent.Image.Model, agent.Image.Options)
+		return image, nil, err
+	}
+	return imageProvider.(openAIImageProvider).generate(ctx, agent, instructions, input, images, options, dashboardCorrelation)
+}
+
+type openAIImageProvider struct{ runner *Runner }
+
+func (p openAIImageProvider) GenerateImage(ctx context.Context, prompt, model string, options map[string]any) (Image, error) {
+	return Image{}, errors.New("OpenAI image provider wird intern über den Responses-Runner ausgeführt")
+}
+func (p openAIImageProvider) generate(ctx context.Context, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (Image, *responses.Response, error) {
+	r := p.runner
 	imageModel := agent.Image.Model
 	if imageModel == "" {
 		imageModel = DefaultImageModel
 	}
-	size := agent.Image.Size
+	imageOptions := map[string]any{}
+	for key, value := range agent.Image.Options {
+		imageOptions[key] = value
+	}
+	size, _ := imageOptions["size"].(string)
+	if size == "" {
+		size = agent.Image.Size
+	}
 	if size == "" {
 		size = "1024x1024"
 	}
@@ -595,12 +709,18 @@ func (r *Runner) runImage(ctx context.Context, agent Agent, instructions, input 
 		}})
 	}
 	imageTool := map[string]any{"type": "image_generation", "model": imageModel, "size": size}
-	quality := agent.Image.Quality
+	quality, _ := imageOptions["quality"].(string)
+	if quality == "" {
+		quality = agent.Image.Quality
+	}
 	if quality == "" {
 		quality = "low"
 	}
 	imageTool["quality"] = quality
-	format := agent.Image.OutputFormat
+	format, _ := imageOptions["output_format"].(string)
+	if format == "" {
+		format = agent.Image.OutputFormat
+	}
 	if format == "" {
 		format = "png"
 	}
