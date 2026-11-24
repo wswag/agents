@@ -371,6 +371,9 @@ func mergeAgentDefinition(explicit, frontmatter Agent) Agent {
 	if explicit.Provider == "" {
 		explicit.Provider = frontmatter.Provider
 	}
+	if explicit.Options == nil {
+		explicit.Options = frontmatter.Options
+	}
 	if explicit.ReasoningEffort == "" || (isTemplateText(explicit.ReasoningEffort) && frontmatter.ReasoningEffort != "") {
 		explicit.ReasoningEffort = frontmatter.ReasoningEffort
 	}
@@ -462,18 +465,19 @@ func parsePromptBundleInternal(source string, inputObject any, renderFrontmatter
 		decoder := yaml.NewDecoder(strings.NewReader(frontmatterText))
 		decoder.KnownFields(true)
 		var frontmatter struct {
-			PromptGuard          PromptGuard   `yaml:"prompt_guard"`
-			Key                  string        `yaml:"key"`
-			Name                 string        `yaml:"name"`
-			Version              string        `yaml:"version"`
-			Model                string        `yaml:"model"`
-			Provider             string        `yaml:"provider"`
-			ReasoningEffort      string        `yaml:"reasoning_effort"`
-			DashboardCorrelation string        `yaml:"dashboard_correlation"`
-			ModelOptions         []ModelOption `yaml:"model_options"`
-			Tools                []Tool        `yaml:"tools"`
-			Output               OutputType    `yaml:"output"`
-			Image                ImageOptions  `yaml:"image"`
+			PromptGuard          PromptGuard    `yaml:"prompt_guard"`
+			Key                  string         `yaml:"key"`
+			Name                 string         `yaml:"name"`
+			Version              string         `yaml:"version"`
+			Model                string         `yaml:"model"`
+			Provider             string         `yaml:"provider"`
+			Options              map[string]any `yaml:"options"`
+			ReasoningEffort      string         `yaml:"reasoning_effort"`
+			DashboardCorrelation string         `yaml:"dashboard_correlation"`
+			ModelOptions         []ModelOption  `yaml:"model_options"`
+			Tools                []Tool         `yaml:"tools"`
+			Output               OutputType     `yaml:"output"`
+			Image                ImageOptions   `yaml:"image"`
 			LoggingOptions       struct {
 				RunLog      bool   `yaml:"run_log"`
 				ContextLog  bool   `yaml:"context_log"`
@@ -498,7 +502,7 @@ func parsePromptBundleInternal(source string, inputObject any, renderFrontmatter
 			metadata = Agent{
 				PromptGuard: frontmatter.PromptGuard,
 				Key:         frontmatter.Key, Name: frontmatter.Name, Version: frontmatter.Version,
-				Model: frontmatter.Model, Provider: frontmatter.Provider, ReasoningEffort: frontmatter.ReasoningEffort, DashboardCorrelation: frontmatter.DashboardCorrelation,
+				Model: frontmatter.Model, Provider: frontmatter.Provider, Options: frontmatter.Options, ReasoningEffort: frontmatter.ReasoningEffort, DashboardCorrelation: frontmatter.DashboardCorrelation,
 				ModelOptions: frontmatter.ModelOptions, Tools: frontmatter.Tools,
 				Output: frontmatter.Output, Image: frontmatter.Image,
 				LoggingOptions: LoggingOptions{
@@ -636,6 +640,9 @@ func (r *Runner) runText(ctx context.Context, client *openai.Client, agent Agent
 	}
 	messages := []any{map[string]any{"role": "system", "content": instructions}, map[string]any{"role": "user", "content": content}}
 	request := map[string]any{"model": agent.Model, "messages": messages}
+	for key, value := range agent.Options {
+		request[key] = value
+	}
 	addChatRunOptions(request, agent, dashboardCorrelation)
 	if len(agent.Tools) > 0 {
 		request["tools"] = agent.Tools

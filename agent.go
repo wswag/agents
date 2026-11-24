@@ -14,7 +14,8 @@ type Agent struct {
 	Name                  string
 	Version               string
 	Model                 string
-	Provider              string `yaml:"provider,omitempty"`
+	Provider              string         `yaml:"provider,omitempty"`
+	Options               map[string]any `yaml:"options,omitempty"`
 	ReasoningEffort       string
 	DashboardCorrelation  string
 	ModelOptions          []ModelOption

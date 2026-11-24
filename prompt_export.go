@@ -22,6 +22,7 @@ type exportedAgentDefinition struct {
 	Version              string                  `yaml:"version,omitempty"`
 	Model                string                  `yaml:"model,omitempty"`
 	Provider             string                  `yaml:"provider,omitempty"`
+	Options              map[string]any          `yaml:"options,omitempty"`
 	ReasoningEffort      string                  `yaml:"reasoning_effort,omitempty"`
 	DashboardCorrelation string                  `yaml:"dashboard_correlation,omitempty"`
 	ModelOptions         []ModelOption           `yaml:"model_options,omitempty"`
@@ -53,7 +54,7 @@ func validateFrontmatterKeyTemplate(frontmatter string) error {
 func (values exportedAgentOverrides) toAgent() (Agent, error) {
 	agent := Agent{
 		PromptGuard: values.PromptGuard,
-		Key:         values.Key, Name: values.Name, Version: values.Version, Model: values.Model, Provider: values.Provider, ReasoningEffort: values.ReasoningEffort,
+		Key:         values.Key, Name: values.Name, Version: values.Version, Model: values.Model, Provider: values.Provider, Options: values.Options, ReasoningEffort: values.ReasoningEffort,
 		DashboardCorrelation: values.DashboardCorrelation, ModelOptions: values.ModelOptions,
 		Tools: values.Tools, Output: values.Output,
 	}
@@ -80,6 +81,9 @@ func (values exportedAgentOverrides) toAgent() (Agent, error) {
 func applyAgentOverrides(agent Agent, overrides Agent) Agent {
 	if overrides.Provider != "" {
 		agent.Provider = overrides.Provider
+	}
+	if overrides.Options != nil {
+		agent.Options = overrides.Options
 	}
 	if overrides.PromptGuard != "" {
 		agent.PromptGuard = overrides.PromptGuard
