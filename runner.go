@@ -99,6 +99,8 @@ type TokenUsage struct {
 	TotalTokens      int64
 }
 
+const imagePromptOutputSchema = `Turn the input into a clear, specific, visually actionable prompt for the configured image generator. Return only that image prompt as text. Do not generate the image yourself or add explanations outside the prompt.`
+
 // NewRunner configures an agent runner. BaseURL may be a /v1 URL or an older /v1/responses URL.
 func NewRunner(config RunnerConfig) *Runner {
 	httpClient := config.HTTPClient
@@ -259,6 +261,13 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 		logRecord.ContextJSON = string(contextJSON)
 	}
 	instructions, err := renderAgentTemplate(agent.Key+"-instructions", systemPrompt+"\n\nAusgabeformat:\n"+outputSchema, inputObject)
+	if err != nil {
+		return Result{}, err
+	}
+	if agent.Output == OutputImage || agent.Output == OutputBoth {
+		outputSchema += "\n\n" + imagePromptOutputSchema
+	}
+	instructions, err = renderAgentTemplate(agent.Key+"-instructions", systemPrompt+"\n\nAusgabeformat:\n"+outputSchema, inputObject)
 	if err != nil {
 		return Result{}, err
 	}
@@ -740,19 +749,29 @@ func (r *Runner) runImage(ctx context.Context, agent Agent, instructions, input 
 	if imageProvider == nil {
 		return Image{}, nil, fmt.Errorf("unbekannter image provider %q", provider)
 	}
-	if provider != "openai" {
-		image, err := imageProvider.GenerateImage(ctx, prompt, agent.Image.Model, agent.Image.Options)
-		return image, nil, err
+	imageOptions := map[string]any{}
+	for k, v := range agent.Image.Options {
+		imageOptions[k] = v
 	}
-	return imageProvider.(openAIImageProvider).generate(ctx, agent, instructions, input, images, options, dashboardCorrelation)
+	image, metadata, err := imageProvider.GenerateImage(ctx, ImageProviderRequest{Prompt: prompt, Model: agent.Image.Model, Options: imageOptions, Agent: agent, Instructions: instructions, Input: input, Images: images, RunOptions: options, DashboardCorrelation: dashboardCorrelation, Client: r.client})
+	if err != nil {
+		return Image{}, nil, err
+	}
+	response := &responses.Response{ID: metadata.ResponseID}
+	return image, response, nil
 }
 
 type openAIImageProvider struct{ runner *Runner }
 
-func (p openAIImageProvider) GenerateImage(ctx context.Context, prompt, model string, options map[string]any) (Image, error) {
-	return Image{}, errors.New("OpenAI image provider wird intern über den Responses-Runner ausgeführt")
+func (p openAIImageProvider) GenerateImage(ctx context.Context, req ImageProviderRequest) (Image, ImageProviderMetadata, error) {
+	image, response, err := p.generateOpenAI(ctx, req)
+	if response == nil {
+		return image, ImageProviderMetadata{}, err
+	}
+	return image, ImageProviderMetadata{ResponseID: response.ID, Usage: TokenUsage{InputTokens: response.Usage.InputTokens, CachedTokens: response.Usage.InputTokensDetails.CachedTokens, CacheWriteTokens: response.Usage.InputTokensDetails.CacheWriteTokens, OutputTokens: response.Usage.OutputTokens, TotalTokens: response.Usage.TotalTokens}}, err
 }
-func (p openAIImageProvider) generate(ctx context.Context, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (Image, *responses.Response, error) {
+func (p openAIImageProvider) generateOpenAI(ctx context.Context, req ImageProviderRequest) (Image, *responses.Response, error) {
+	agent, instructions, input, images, options, dashboardCorrelation := req.Agent, req.Instructions, req.Input, req.Images, req.RunOptions, req.DashboardCorrelation
 	r := p.runner
 	imageModel := agent.Image.Model
 	if imageModel == "" {

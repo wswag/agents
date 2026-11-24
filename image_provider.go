@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	openai "github.com/openai/openai-go/v3"
 	"io"
 	"net/http"
 	"strings"
@@ -14,7 +15,24 @@ import (
 
 // ImageProvider generates an image from the prompt produced by the agent's language model.
 type ImageProvider interface {
-	GenerateImage(ctx context.Context, prompt, model string, options map[string]any) (Image, error)
+	GenerateImage(ctx context.Context, request ImageProviderRequest) (Image, ImageProviderMetadata, error)
+}
+
+type ImageProviderMetadata struct {
+	ResponseID string
+	Usage      TokenUsage
+}
+type ImageProviderRequest struct {
+	Prompt               string
+	Model                string
+	Options              map[string]any
+	Agent                Agent
+	Instructions         string
+	Input                string
+	Images               []ImageInput
+	RunOptions           RunOptions
+	DashboardCorrelation string
+	Client               *openai.Client
 }
 
 func (r *Runner) RegisterImageProvider(name string, provider ImageProvider) error {
@@ -39,9 +57,9 @@ type BFLImageProvider struct {
 	BaseURL    string
 }
 
-func (p BFLImageProvider) GenerateImage(ctx context.Context, prompt, model string, options map[string]any) (Image, error) {
+func (p BFLImageProvider) GenerateImage(ctx context.Context, request ImageProviderRequest) (Image, ImageProviderMetadata, error) {
 	if strings.TrimSpace(p.APIKey) == "" {
-		return Image{}, errors.New("BFL API-Key fehlt")
+		return Image{}, ImageProviderMetadata{}, errors.New("BFL API-Key fehlt")
 	}
 	client := p.HTTPClient
 	if client == nil {
@@ -51,7 +69,8 @@ func (p BFLImageProvider) GenerateImage(ctx context.Context, prompt, model strin
 	if base == "" {
 		base = "https://api.bfl.ai"
 	}
-	return generateBFLImage(ctx, client, p.APIKey, base, prompt, model, options)
+	image, err := generateBFLImage(ctx, client, p.APIKey, base, request.Prompt, request.Model, request.Options)
+	return image, ImageProviderMetadata{}, err
 }
 
 func generateBFLImage(ctx context.Context, client *http.Client, key, base, prompt, model string, options map[string]any) (Image, error) {
