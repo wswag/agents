@@ -21,6 +21,7 @@ type exportedAgentDefinition struct {
 	Name                 string                  `yaml:"name,omitempty"`
 	Version              string                  `yaml:"version,omitempty"`
 	Model                string                  `yaml:"model,omitempty"`
+	Provider             string                  `yaml:"provider,omitempty"`
 	ReasoningEffort      string                  `yaml:"reasoning_effort,omitempty"`
 	DashboardCorrelation string                  `yaml:"dashboard_correlation,omitempty"`
 	ModelOptions         []ModelOption           `yaml:"model_options,omitempty"`
@@ -52,7 +53,7 @@ func validateFrontmatterKeyTemplate(frontmatter string) error {
 func (values exportedAgentOverrides) toAgent() (Agent, error) {
 	agent := Agent{
 		PromptGuard: values.PromptGuard,
-		Key:         values.Key, Name: values.Name, Version: values.Version, Model: values.Model, ReasoningEffort: values.ReasoningEffort,
+		Key:         values.Key, Name: values.Name, Version: values.Version, Model: values.Model, Provider: values.Provider, ReasoningEffort: values.ReasoningEffort,
 		DashboardCorrelation: values.DashboardCorrelation, ModelOptions: values.ModelOptions,
 		Tools: values.Tools, Output: values.Output,
 	}
@@ -77,6 +78,9 @@ func (values exportedAgentOverrides) toAgent() (Agent, error) {
 }
 
 func applyAgentOverrides(agent Agent, overrides Agent) Agent {
+	if overrides.Provider != "" {
+		agent.Provider = overrides.Provider
+	}
 	if overrides.PromptGuard != "" {
 		agent.PromptGuard = overrides.PromptGuard
 	}
@@ -154,7 +158,7 @@ func ExportPromptBundle(agent Agent) (string, error) {
 	agent = mergeAgentDefinition(agent, frontmatter)
 	definition := exportedAgentDefinition{
 		PromptGuard: agent.PromptGuard,
-		Key:         agent.Key, Name: agent.Name, Version: agent.Version, Model: agent.Model,
+		Key:         agent.Key, Name: agent.Name, Version: agent.Version, Model: agent.Model, Provider: agent.Provider,
 		DashboardCorrelation: agent.DashboardCorrelation, ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
 		Tools: agent.Tools, Output: agent.Output,
 	}

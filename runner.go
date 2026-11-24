@@ -28,12 +28,16 @@ type RunnerConfig struct {
 	Logger     RunLogger
 }
 
+type LLMProviderConfig struct{ Name, APIKey, BaseURL string }
+
 // Runner executes code-defined agents through the configured provider.
 type Runner struct {
-	client         *openai.Client
-	logger         RunLogger
-	httpClient     *http.Client
-	imageProviders map[string]ImageProvider
+	client             *openai.Client
+	llmProviders       map[string]*openai.Client
+	defaultLLMProvider string
+	logger             RunLogger
+	httpClient         *http.Client
+	imageProviders     map[string]ImageProvider
 }
 
 // ImageInput lets a parameter or context object include an image for visual tasks.
@@ -76,6 +80,7 @@ type RunOptions struct {
 	ModelOverride        string
 	AgentVersion         string
 	Metadata             map[string]string
+	Provider             string
 }
 
 type ConversationMode string
@@ -111,9 +116,64 @@ func NewRunner(config RunnerConfig) *Runner {
 		baseURL = strings.TrimSuffix(baseURL, "/responses")
 	}
 	client := openai.NewClient(option.WithAPIKey(config.APIKey), option.WithBaseURL(baseURL), option.WithHTTPClient(httpClient))
-	runner := &Runner{client: &client, logger: config.Logger, httpClient: httpClient, imageProviders: make(map[string]ImageProvider)}
+	runner := &Runner{client: &client, logger: config.Logger, httpClient: httpClient, imageProviders: make(map[string]ImageProvider), llmProviders: make(map[string]*openai.Client)}
+	if config.APIKey != "" || config.BaseURL != "" {
+		_ = runner.RegisterLLMProvider("openai", LLMProviderConfig{Name: "openai", APIKey: config.APIKey, BaseURL: baseURL}, httpClient)
+	}
 	_ = runner.RegisterImageProvider("openai", openAIImageProvider{runner: runner})
 	return runner
+}
+
+func (r *Runner) RegisterLLMProvider(name string, config LLMProviderConfig, clients ...*http.Client) error {
+	if r == nil {
+		return errors.New("agent runner ist nicht initialisiert")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("LLM provider name ist leer")
+	}
+	httpClient := r.httpClient
+	if len(clients) > 0 && clients[0] != nil {
+		httpClient = clients[0]
+	}
+	base := strings.TrimSpace(config.BaseURL)
+	if base == "" {
+		base = "https://api.openai.com/v1"
+	}
+	if parsed, err := url.Parse(base); err == nil {
+		parsed.Path = strings.TrimSuffix(parsed.Path, "/responses")
+		parsed.RawQuery = ""
+		base = strings.TrimRight(parsed.String(), "/")
+	}
+	c := openai.NewClient(option.WithAPIKey(config.APIKey), option.WithBaseURL(base), option.WithHTTPClient(httpClient))
+	r.llmProviders[name] = &c
+	if r.defaultLLMProvider == "" {
+		r.defaultLLMProvider = name
+	}
+	return nil
+}
+
+func (r *Runner) SetDefaultLLMProvider(name string) error {
+	if r == nil || r.llmProviders[name] == nil {
+		return fmt.Errorf("unbekannter LLM provider %q", name)
+	}
+	r.defaultLLMProvider = name
+	return nil
+}
+
+func (r *Runner) llmClient(agent Agent, options RunOptions) (*openai.Client, error) {
+	name := options.Provider
+	if name == "" {
+		name = agent.Provider
+	}
+	if name == "" {
+		name = r.defaultLLMProvider
+	}
+	c := r.llmProviders[name]
+	if c == nil {
+		return nil, fmt.Errorf("unbekannter LLM provider %q", name)
+	}
+	return c, nil
 }
 
 // Run renders the agent templates directly from the input object, then executes the agent.
@@ -168,6 +228,10 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 	if model := strings.TrimSpace(runOptions.ModelOverride); model != "" {
 		agent.Model = model
 	}
+	llmClient, err := r.llmClient(agent, runOptions)
+	if err != nil {
+		return Result{}, err
+	}
 	if logRecord != nil {
 		logRecord.Model = agent.Model
 	}
@@ -207,7 +271,7 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 	images := collectImages(reflect.ValueOf(inputObject))
 	result := Result{PreviousResponseID: runOptions.PreviousResponseID, DashboardCorrelation: dashboardCorrelation}
 	if agent.Output == OutputText || agent.Output == OutputBoth {
-		text, metadata, err := r.runText(ctx, agent, instructions, input, images, runOptions, dashboardCorrelation)
+		text, metadata, err := r.runText(ctx, llmClient, agent, instructions, input, images, runOptions, dashboardCorrelation)
 		if err != nil {
 			return Result{}, err
 		}
@@ -303,6 +367,9 @@ func mergeAgentDefinition(explicit, frontmatter Agent) Agent {
 	}
 	if explicit.Model == "" || (isTemplateText(explicit.Model) && frontmatter.Model != "") {
 		explicit.Model = frontmatter.Model
+	}
+	if explicit.Provider == "" {
+		explicit.Provider = frontmatter.Provider
 	}
 	if explicit.ReasoningEffort == "" || (isTemplateText(explicit.ReasoningEffort) && frontmatter.ReasoningEffort != "") {
 		explicit.ReasoningEffort = frontmatter.ReasoningEffort
@@ -400,6 +467,7 @@ func parsePromptBundleInternal(source string, inputObject any, renderFrontmatter
 			Name                 string        `yaml:"name"`
 			Version              string        `yaml:"version"`
 			Model                string        `yaml:"model"`
+			Provider             string        `yaml:"provider"`
 			ReasoningEffort      string        `yaml:"reasoning_effort"`
 			DashboardCorrelation string        `yaml:"dashboard_correlation"`
 			ModelOptions         []ModelOption `yaml:"model_options"`
@@ -430,7 +498,7 @@ func parsePromptBundleInternal(source string, inputObject any, renderFrontmatter
 			metadata = Agent{
 				PromptGuard: frontmatter.PromptGuard,
 				Key:         frontmatter.Key, Name: frontmatter.Name, Version: frontmatter.Version,
-				Model: frontmatter.Model, ReasoningEffort: frontmatter.ReasoningEffort, DashboardCorrelation: frontmatter.DashboardCorrelation,
+				Model: frontmatter.Model, Provider: frontmatter.Provider, ReasoningEffort: frontmatter.ReasoningEffort, DashboardCorrelation: frontmatter.DashboardCorrelation,
 				ModelOptions: frontmatter.ModelOptions, Tools: frontmatter.Tools,
 				Output: frontmatter.Output, Image: frontmatter.Image,
 				LoggingOptions: LoggingOptions{
@@ -538,7 +606,7 @@ func renderAgentTemplate(name, source string, inputObject any) (string, error) {
 	return strings.TrimSpace(rendered.String()), nil
 }
 
-func (r *Runner) runText(ctx context.Context, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (string, ResponseMetadata, error) {
+func (r *Runner) runText(ctx context.Context, client *openai.Client, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (string, ResponseMetadata, error) {
 	mode := options.ConversationMode
 	if mode == "" {
 		mode = ConversationModeChatCompletions
@@ -550,7 +618,7 @@ func (r *Runner) runText(ctx context.Context, agent Agent, instructions, input s
 		return "", ResponseMetadata{}, fmt.Errorf("unbekannter conversation mode %q", mode)
 	}
 	if mode == ConversationModeResponses {
-		return r.runTextResponses(ctx, agent, instructions, input, images, options, dashboardCorrelation)
+		return r.runTextResponses(ctx, client, agent, instructions, input, images, options, dashboardCorrelation)
 	}
 	if input == "" && len(images) == 0 {
 		return "", ResponseMetadata{}, errors.New("agent input ist leer")
@@ -580,7 +648,7 @@ func (r *Runner) runText(ctx context.Context, agent Agent, instructions, input s
 	if err := json.Unmarshal(body, &params); err != nil {
 		return "", ResponseMetadata{}, fmt.Errorf("agent request in SDK-parameter umwandeln: %w", err)
 	}
-	response, err := r.client.Chat.Completions.New(ctx, params)
+	response, err := client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return "", ResponseMetadata{}, fmt.Errorf("agent %q ausführen: %w", agent.Key, err)
 	}
@@ -595,7 +663,7 @@ func (r *Runner) runText(ctx context.Context, agent Agent, instructions, input s
 	return text, ResponseMetadata{ID: response.ID, DashboardCorrelation: dashboardCorrelation, Usage: usage}, nil
 }
 
-func (r *Runner) runTextResponses(ctx context.Context, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (string, ResponseMetadata, error) {
+func (r *Runner) runTextResponses(ctx context.Context, client *openai.Client, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (string, ResponseMetadata, error) {
 	if input == "" && len(images) == 0 {
 		return "", ResponseMetadata{}, errors.New("agent input ist leer")
 	}
@@ -623,7 +691,7 @@ func (r *Runner) runTextResponses(ctx context.Context, agent Agent, instructions
 	if err = json.Unmarshal(body, &params); err != nil {
 		return "", ResponseMetadata{}, err
 	}
-	response, err := r.client.Responses.New(ctx, params)
+	response, err := client.Responses.New(ctx, params)
 	if err != nil {
 		return "", ResponseMetadata{}, fmt.Errorf("agent %q ausführen: %w", agent.Key, err)
 	}
