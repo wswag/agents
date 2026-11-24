@@ -21,6 +21,8 @@ type exportedAgentDefinition struct {
 	Name                 string                  `yaml:"name,omitempty"`
 	Version              string                  `yaml:"version,omitempty"`
 	Model                string                  `yaml:"model,omitempty"`
+	Provider             string                  `yaml:"provider,omitempty"`
+	Options              map[string]any          `yaml:"options,omitempty"`
 	ReasoningEffort      string                  `yaml:"reasoning_effort,omitempty"`
 	DashboardCorrelation string                  `yaml:"dashboard_correlation,omitempty"`
 	ModelOptions         []ModelOption           `yaml:"model_options,omitempty"`
@@ -52,7 +54,7 @@ func validateFrontmatterKeyTemplate(frontmatter string) error {
 func (values exportedAgentOverrides) toAgent() (Agent, error) {
 	agent := Agent{
 		PromptGuard: values.PromptGuard,
-		Key:         values.Key, Name: values.Name, Version: values.Version, Model: values.Model, ReasoningEffort: values.ReasoningEffort,
+		Key:         values.Key, Name: values.Name, Version: values.Version, Model: values.Model, Provider: values.Provider, Options: values.Options, ReasoningEffort: values.ReasoningEffort,
 		DashboardCorrelation: values.DashboardCorrelation, ModelOptions: values.ModelOptions,
 		Tools: values.Tools, Output: values.Output,
 	}
@@ -77,6 +79,12 @@ func (values exportedAgentOverrides) toAgent() (Agent, error) {
 }
 
 func applyAgentOverrides(agent Agent, overrides Agent) Agent {
+	if overrides.Provider != "" {
+		agent.Provider = overrides.Provider
+	}
+	if overrides.Options != nil {
+		agent.Options = overrides.Options
+	}
 	if overrides.PromptGuard != "" {
 		agent.PromptGuard = overrides.PromptGuard
 	}
@@ -104,8 +112,14 @@ func applyAgentOverrides(agent Agent, overrides Agent) Agent {
 	if overrides.Output != "" {
 		agent.Output = overrides.Output
 	}
+	if overrides.Image.Provider != "" {
+		agent.Image.Provider = overrides.Image.Provider
+	}
 	if overrides.Image.Model != "" {
 		agent.Image.Model = overrides.Image.Model
+	}
+	if overrides.Image.Options != nil {
+		agent.Image.Options = overrides.Image.Options
 	}
 	if overrides.Image.Size != "" {
 		agent.Image.Size = overrides.Image.Size
@@ -148,11 +162,11 @@ func ExportPromptBundle(agent Agent) (string, error) {
 	agent = mergeAgentDefinition(agent, frontmatter)
 	definition := exportedAgentDefinition{
 		PromptGuard: agent.PromptGuard,
-		Key:         agent.Key, Name: agent.Name, Version: agent.Version, Model: agent.Model,
+		Key:         agent.Key, Name: agent.Name, Version: agent.Version, Model: agent.Model, Provider: agent.Provider,
 		DashboardCorrelation: agent.DashboardCorrelation, ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
 		Tools: agent.Tools, Output: agent.Output,
 	}
-	if agent.Image != (ImageOptions{}) {
+	if !imageOptionsEmpty(agent.Image) {
 		definition.Image = &agent.Image
 	}
 	if agent.LoggingOptions != (LoggingOptions{}) {
@@ -220,7 +234,7 @@ func agentToExportedDefinition(agent Agent) exportedAgentDefinition {
 		DashboardCorrelation: agent.DashboardCorrelation, ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
 		Tools: agent.Tools, Output: agent.Output,
 	}
-	if agent.Image != (ImageOptions{}) {
+	if !imageOptionsEmpty(agent.Image) {
 		definition.Image = &agent.Image
 	}
 	if agent.LoggingOptions != (LoggingOptions{}) {
@@ -234,6 +248,10 @@ func agentToExportedDefinition(agent Agent) exportedAgentDefinition {
 		definition.LoggingOptions = logging
 	}
 	return definition
+}
+
+func imageOptionsEmpty(options ImageOptions) bool {
+	return options.Provider == "" && options.Model == "" && len(options.Options) == 0 && options.Size == "" && options.Quality == "" && options.OutputFormat == ""
 }
 
 func readAgentBundleSource(agent Agent) (string, bool, error) {
