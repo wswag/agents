@@ -122,7 +122,6 @@ func NewRunner(config RunnerConfig) *Runner {
 	if config.APIKey != "" || config.BaseURL != "" {
 		_ = runner.RegisterLLMProvider("openai", LLMProviderConfig{Name: "openai", APIKey: config.APIKey, BaseURL: baseURL}, httpClient)
 	}
-	_ = runner.RegisterImageProvider("openai", openAIImageProvider{runner: runner})
 	return runner
 }
 
@@ -243,7 +242,7 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 	if agent.Output == "" {
 		agent.Output = OutputText
 	}
-	if agent.Output != OutputText && agent.Output != OutputImage && agent.Output != OutputBoth {
+	if agent.Output != OutputText && agent.Output != OutputImage {
 		return Result{}, fmt.Errorf("unbekannter agent output-typ %q", agent.Output)
 	}
 	input, err := renderAgentTemplate(agent.Key+"-input", inputTemplate, inputObject)
@@ -260,14 +259,14 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 		}
 		logRecord.ContextJSON = string(contextJSON)
 	}
-	instructions, err := renderAgentTemplate(agent.Key+"-instructions", systemPrompt+"\n\nAusgabeformat:\n"+outputSchema, inputObject)
+	instructions, err := renderAgentTemplate(agent.Key+"-instructions", systemPrompt+"\noutput format:\n"+outputSchema, inputObject)
 	if err != nil {
 		return Result{}, err
 	}
-	if agent.Output == OutputImage || agent.Output == OutputBoth {
+	if agent.Output == OutputImage {
 		outputSchema += "\n\n" + imagePromptOutputSchema
 	}
-	instructions, err = renderAgentTemplate(agent.Key+"-instructions", systemPrompt+"\n\nAusgabeformat:\n"+outputSchema, inputObject)
+	instructions, err = renderAgentTemplate(agent.Key+"-instructions", systemPrompt+"\noutput format:\n"+outputSchema, inputObject)
 	if err != nil {
 		return Result{}, err
 	}
@@ -279,21 +278,23 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 	}
 	images := collectImages(reflect.ValueOf(inputObject))
 	result := Result{PreviousResponseID: runOptions.PreviousResponseID, DashboardCorrelation: dashboardCorrelation}
-	if agent.Output == OutputText || agent.Output == OutputBoth {
-		text, metadata, err := r.runText(ctx, llmClient, agent, instructions, input, images, runOptions, dashboardCorrelation)
-		if err != nil {
-			return Result{}, err
-		}
-		result.Text = text
-		result.addMetadata(metadata)
-		if effectivePromptGuard(agent.PromptGuard) != "" {
-			if err := checkPromptBlock(result); err != nil {
-				return result, err
-			}
+
+	// always run text
+	text, metadata, err := r.runText(ctx, llmClient, agent, instructions, input, images, runOptions, dashboardCorrelation)
+	if err != nil {
+		return Result{}, err
+	}
+	result.Text = text
+	result.addMetadata(metadata)
+	if effectivePromptGuard(agent.PromptGuard) != "" {
+		if err := checkPromptBlock(result); err != nil {
+			return result, err
 		}
 	}
-	if agent.Output == OutputImage || agent.Output == OutputBoth {
-		image, response, err := r.runImage(ctx, agent, instructions, input, images, runOptions, dashboardCorrelation)
+
+	// run image with the generated text
+	if agent.Output == OutputImage {
+		image, response, err := r.runImage(ctx, agent, "", text, images, runOptions, dashboardCorrelation)
 		if err != nil {
 			return Result{}, err
 		}
@@ -759,110 +760,6 @@ func (r *Runner) runImage(ctx context.Context, agent Agent, instructions, input 
 	}
 	response := &responses.Response{ID: metadata.ResponseID}
 	return image, response, nil
-}
-
-type openAIImageProvider struct{ runner *Runner }
-
-func (p openAIImageProvider) GenerateImage(ctx context.Context, req ImageProviderRequest) (Image, ImageProviderMetadata, error) {
-	image, response, err := p.generateOpenAI(ctx, req)
-	if response == nil {
-		return image, ImageProviderMetadata{}, err
-	}
-	return image, ImageProviderMetadata{ResponseID: response.ID, Usage: TokenUsage{InputTokens: response.Usage.InputTokens, CachedTokens: response.Usage.InputTokensDetails.CachedTokens, CacheWriteTokens: response.Usage.InputTokensDetails.CacheWriteTokens, OutputTokens: response.Usage.OutputTokens, TotalTokens: response.Usage.TotalTokens}}, err
-}
-func (p openAIImageProvider) generateOpenAI(ctx context.Context, req ImageProviderRequest) (Image, *responses.Response, error) {
-	agent, instructions, input, images, options, dashboardCorrelation := req.Agent, req.Instructions, req.Input, req.Images, req.RunOptions, req.DashboardCorrelation
-	r := p.runner
-	imageModel := agent.Image.Model
-	if imageModel == "" {
-		imageModel = DefaultImageModel
-	}
-	imageOptions := map[string]any{}
-	for key, value := range agent.Image.Options {
-		imageOptions[key] = value
-	}
-	size, _ := imageOptions["size"].(string)
-	if size == "" {
-		size = agent.Image.Size
-	}
-	if size == "" {
-		size = "1024x1024"
-	}
-	// The Responses image tool handles both text-to-image and reference-image editing.
-	content := make([]responses.ResponseInputContentUnionParam, 0, len(images)+1)
-	if input != "" {
-		content = append(content, responses.ResponseInputContentUnionParam{OfInputText: &responses.ResponseInputTextParam{Text: input}})
-	}
-	for _, image := range images {
-		if len(image.Data) == 0 || strings.TrimSpace(image.MIMEType) == "" {
-			return Image{}, nil, errors.New("agent image input benötigt MIMEType und Data")
-		}
-		dataURL := "data:" + image.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)
-		content = append(content, responses.ResponseInputContentUnionParam{OfInputImage: &responses.ResponseInputImageParam{
-			Detail: responses.ResponseInputImageDetailAuto, ImageURL: openai.String(dataURL),
-		}})
-	}
-	imageTool := map[string]any{"type": "image_generation", "model": imageModel, "size": size}
-	quality, _ := imageOptions["quality"].(string)
-	if quality == "" {
-		quality = agent.Image.Quality
-	}
-	if quality == "" {
-		quality = "low"
-	}
-	imageTool["quality"] = quality
-	format, _ := imageOptions["output_format"].(string)
-	if format == "" {
-		format = agent.Image.OutputFormat
-	}
-	if format == "" {
-		format = "png"
-	}
-	var mimeType string
-	switch format {
-	case "png":
-		mimeType = "image/png"
-	case "jpeg":
-		mimeType = "image/jpeg"
-	case "webp":
-		mimeType = "image/webp"
-	default:
-		return Image{}, nil, fmt.Errorf("unbekanntes bildformat %q", format)
-	}
-	imageTool["output_format"] = format
-	request := map[string]any{
-		"model":        agent.Model,
-		"instructions": instructions,
-		"input":        []any{map[string]any{"role": "user", "content": content}},
-		"tools":        []any{imageTool},
-		"store":        false,
-	}
-	addRunOptions(request, options, agent, dashboardCorrelation)
-	body, err := json.Marshal(request)
-	if err != nil {
-		return Image{}, nil, fmt.Errorf("agent image request serialisieren: %w", err)
-	}
-	var params responses.ResponseNewParams
-	if err := json.Unmarshal(body, &params); err != nil {
-		return Image{}, nil, fmt.Errorf("agent image request in SDK-parameter umwandeln: %w", err)
-	}
-	response, err := r.client.Responses.New(ctx, params)
-	if err != nil {
-		return Image{}, nil, fmt.Errorf("agent %q bildgenerierung: %w", agent.Key, err)
-	}
-	for _, item := range response.Output {
-		if item.Type == "image_generation_call" {
-			image := item.AsImageGenerationCall()
-			if image.Result != "" {
-				data, err := base64.StdEncoding.DecodeString(image.Result)
-				if err != nil {
-					return Image{}, nil, fmt.Errorf("agent bild dekodieren: %w", err)
-				}
-				return Image{MIMEType: mimeType, Data: data}, response, nil
-			}
-		}
-	}
-	return Image{}, nil, fmt.Errorf("agent %q lieferte kein bild", agent.Key)
 }
 
 func addRunOptions(request map[string]any, options RunOptions, agent Agent, dashboardCorrelation string) {

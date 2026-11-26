@@ -54,7 +54,6 @@ type OutputType string
 const (
 	OutputText  OutputType = "text"
 	OutputImage OutputType = "image"
-	OutputBoth  OutputType = "both"
 )
 
 // ImageOptions configures image generation for agents with OutputImage or OutputBoth.
