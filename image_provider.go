@@ -13,6 +13,7 @@ import (
 	"time"
 
 	openai "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
 )
 
@@ -26,16 +27,15 @@ type ImageProviderMetadata struct {
 	Usage      TokenUsage
 }
 type ImageProviderRequest struct {
-	Prompt               string
-	Model                string
-	Options              map[string]any
-	Agent                Agent
-	Instructions         string
-	Input                string
-	Images               []ImageInput
-	RunOptions           RunOptions
-	DashboardCorrelation string
-	Client               *openai.Client
+	Prompt       string
+	Model        string
+	Options      map[string]any
+	Agent        Agent
+	Instructions string
+	Input        string
+	Images       []ImageInput
+	RunOptions   RunOptions
+	Client       *openai.Client
 }
 
 func (r *Runner) RegisterImageProvider(name string, provider ImageProvider) error {
@@ -167,7 +167,7 @@ func (p OpenAIImageProvider) GenerateImage(ctx context.Context, req ImageProvide
 	return image, ImageProviderMetadata{ResponseID: response.ID, Usage: TokenUsage{InputTokens: response.Usage.InputTokens, CachedTokens: response.Usage.InputTokensDetails.CachedTokens, CacheWriteTokens: response.Usage.InputTokensDetails.CacheWriteTokens, OutputTokens: response.Usage.OutputTokens, TotalTokens: response.Usage.TotalTokens}}, err
 }
 func (p OpenAIImageProvider) generateOpenAI(ctx context.Context, req ImageProviderRequest) (Image, *responses.Response, error) {
-	agent, instructions, input, images, options, dashboardCorrelation := req.Agent, req.Instructions, req.Input, req.Images, req.RunOptions, req.DashboardCorrelation
+	agent, instructions, input, images, options := req.Agent, req.Instructions, req.Input, req.Images, req.RunOptions
 	r := p.runner
 	imageModel := agent.Image.Model
 	if imageModel == "" {
@@ -233,7 +233,8 @@ func (p OpenAIImageProvider) generateOpenAI(ctx context.Context, req ImageProvid
 		"tools":        []any{imageTool},
 		"store":        false,
 	}
-	addRunOptions(request, options, agent, dashboardCorrelation)
+	addRunOptions(request, options)
+	addRequestOptions(request, agent.Options, options.RequestOptions)
 	body, err := json.Marshal(request)
 	if err != nil {
 		return Image{}, nil, fmt.Errorf("agent image request serialisieren: %w", err)
@@ -242,7 +243,7 @@ func (p OpenAIImageProvider) generateOpenAI(ctx context.Context, req ImageProvid
 	if err := json.Unmarshal(body, &params); err != nil {
 		return Image{}, nil, fmt.Errorf("agent image request in SDK-parameter umwandeln: %w", err)
 	}
-	response, err := r.client.Responses.New(ctx, params)
+	response, err := r.client.Responses.New(ctx, params, option.WithRequestBody("application/json", body))
 	if err != nil {
 		return Image{}, nil, fmt.Errorf("agent %q bildgenerierung: %w", agent.Key, err)
 	}

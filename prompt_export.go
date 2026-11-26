@@ -16,20 +16,19 @@ type exportedLoggingOptions struct {
 }
 
 type exportedAgentDefinition struct {
-	PromptGuard          PromptGuard             `yaml:"prompt_guard,omitempty"`
-	Key                  string                  `yaml:"key,omitempty"`
-	Name                 string                  `yaml:"name,omitempty"`
-	Version              string                  `yaml:"version,omitempty"`
-	Model                string                  `yaml:"model,omitempty"`
-	Provider             string                  `yaml:"provider,omitempty"`
-	Options              map[string]any          `yaml:"options,omitempty"`
-	ReasoningEffort      string                  `yaml:"reasoning_effort,omitempty"`
-	DashboardCorrelation string                  `yaml:"dashboard_correlation,omitempty"`
-	ModelOptions         []ModelOption           `yaml:"model_options,omitempty"`
-	Tools                []Tool                  `yaml:"tools,omitempty"`
-	Output               OutputType              `yaml:"output,omitempty"`
-	Image                *ImageOptions           `yaml:"image,omitempty"`
-	LoggingOptions       *exportedLoggingOptions `yaml:"logging_options,omitempty"`
+	PromptGuard     PromptGuard             `yaml:"prompt_guard,omitempty"`
+	Key             string                  `yaml:"key,omitempty"`
+	Name            string                  `yaml:"name,omitempty"`
+	Version         string                  `yaml:"version,omitempty"`
+	Model           string                  `yaml:"model,omitempty"`
+	Provider        string                  `yaml:"provider,omitempty"`
+	Options         map[string]any          `yaml:"options,omitempty"`
+	ReasoningEffort string                  `yaml:"reasoning_effort,omitempty"`
+	ModelOptions    []ModelOption           `yaml:"model_options,omitempty"`
+	Tools           []Tool                  `yaml:"tools,omitempty"`
+	Output          OutputType              `yaml:"output,omitempty"`
+	Image           *ImageOptions           `yaml:"image,omitempty"`
+	LoggingOptions  *exportedLoggingOptions `yaml:"logging_options,omitempty"`
 }
 
 type exportedAgentOverrides exportedAgentDefinition
@@ -55,8 +54,8 @@ func (values exportedAgentOverrides) toAgent() (Agent, error) {
 	agent := Agent{
 		PromptGuard: values.PromptGuard,
 		Key:         values.Key, Name: values.Name, Version: values.Version, Model: values.Model, Provider: values.Provider, Options: values.Options, ReasoningEffort: values.ReasoningEffort,
-		DashboardCorrelation: values.DashboardCorrelation, ModelOptions: values.ModelOptions,
-		Tools: values.Tools, Output: values.Output,
+		ModelOptions: values.ModelOptions,
+		Tools:        values.Tools, Output: values.Output,
 	}
 	if values.Image != nil {
 		agent.Image = *values.Image
@@ -99,9 +98,6 @@ func applyAgentOverrides(agent Agent, overrides Agent) Agent {
 	}
 	if overrides.Model != "" {
 		agent.Model = overrides.Model
-	}
-	if overrides.DashboardCorrelation != "" {
-		agent.DashboardCorrelation = overrides.DashboardCorrelation
 	}
 	if len(overrides.ModelOptions) > 0 {
 		agent.ModelOptions = overrides.ModelOptions
@@ -163,7 +159,7 @@ func ExportPromptBundle(agent Agent) (string, error) {
 	definition := exportedAgentDefinition{
 		PromptGuard: agent.PromptGuard,
 		Key:         agent.Key, Name: agent.Name, Version: agent.Version, Model: agent.Model, Provider: agent.Provider,
-		DashboardCorrelation: agent.DashboardCorrelation, ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
+		ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
 		Tools: agent.Tools, Output: agent.Output,
 	}
 	if !imageOptionsEmpty(agent.Image) {
@@ -231,7 +227,7 @@ func agentToExportedDefinition(agent Agent) exportedAgentDefinition {
 	definition := exportedAgentDefinition{
 		PromptGuard: agent.PromptGuard,
 		Key:         agent.Key, Name: agent.Name, Version: agent.Version, Model: agent.Model,
-		DashboardCorrelation: agent.DashboardCorrelation, ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
+		ReasoningEffort: agent.ReasoningEffort, ModelOptions: agent.ModelOptions,
 		Tools: agent.Tools, Output: agent.Output,
 	}
 	if !imageOptionsEmpty(agent.Image) {
