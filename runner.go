@@ -238,7 +238,7 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 	if agent.Output == "" {
 		agent.Output = OutputText
 	}
-	if agent.Output != OutputText && agent.Output != OutputImage {
+	if agent.Output != OutputText && agent.Output != OutputImage && agent.Output != OutputImageAfterText {
 		return Result{}, fmt.Errorf("unbekannter agent output-typ %q", agent.Output)
 	}
 	input, err := renderAgentTemplate(agent.Key+"-input", inputTemplate, inputObject)
