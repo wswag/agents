@@ -54,33 +54,30 @@ type Image struct {
 
 // Result contains the requested text and/or generated images.
 type Result struct {
-	Text                 string
-	Images               []Image
-	DashboardCorrelation string
-	ResponseID           string
-	ResponseIDs          []string
-	PreviousResponseID   string
-	Responses            []ResponseMetadata
-	Usage                TokenUsage
+	Text               string
+	Images             []Image
+	ResponseID         string
+	ResponseIDs        []string
+	PreviousResponseID string
+	Responses          []ResponseMetadata
+	Usage              TokenUsage
 }
 
 // ResponseMetadata ties token usage to the response that produced it.
 type ResponseMetadata struct {
-	ID                   string
-	PreviousResponseID   string
-	DashboardCorrelation string
-	Usage                TokenUsage
+	ID                 string
+	PreviousResponseID string
+	Usage              TokenUsage
 }
 
 // RunOptions carries request-level cache and conversation state.
 type RunOptions struct {
-	ConversationMode     ConversationMode
-	DashboardCorrelation string
-	PreviousResponseID   string
-	ModelOverride        string
-	AgentVersion         string
-	Metadata             map[string]string
-	Provider             string
+	ConversationMode   ConversationMode
+	PreviousResponseID string
+	ModelOverride      string
+	AgentVersion       string
+	RequestOptions     map[string]any
+	Provider           string
 }
 
 type ConversationMode string
@@ -198,7 +195,6 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 		return Result{}, err
 	}
 	agent = mergeAgentDefinition(agent, frontmatter)
-	dashboardCorrelation := resolveDashboardCorrelation(agent, inputObject, runOptions)
 	loggingOptions := agent.LoggingOptions
 	loggingRequested := loggingOptions.RunLog || loggingOptions.ContextLog || loggingOptions.ResponseLog
 	loggingEnabled := loggingRequested && r.logger != nil
@@ -211,7 +207,7 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 		logRecord = &RunLogRecord{
 			StartedAt: startedAt, AgentKey: agent.Key, AgentVersion: agent.Version,
 			PreviousResponseID: runOptions.PreviousResponseID,
-			MetadataJSON:       runMetadataJSON(agent, runOptions, dashboardCorrelation),
+			MetadataJSON:       runMetadataJSON(agent),
 		}
 		if loggingOptions.TTL > 0 {
 			logRecord.ExpiresAt = startedAt.Add(loggingOptions.TTL)
@@ -263,7 +259,7 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 	if err != nil {
 		return Result{}, err
 	}
-	if agent.Output == OutputImage {
+	if agent.Output == OutputImageAfterText {
 		outputSchema += "\n\n" + imagePromptOutputSchema
 	}
 	instructions, err = renderAgentTemplate(agent.Key+"-instructions", systemPrompt+"\noutput format:\n"+outputSchema, inputObject)
@@ -277,29 +273,35 @@ func (r *Runner) Run(ctx context.Context, agent Agent, inputObject any, options 
 		}
 	}
 	images := collectImages(reflect.ValueOf(inputObject))
-	result := Result{PreviousResponseID: runOptions.PreviousResponseID, DashboardCorrelation: dashboardCorrelation}
+	result := Result{PreviousResponseID: runOptions.PreviousResponseID}
 
 	// always run text
-	text, metadata, err := r.runText(ctx, llmClient, agent, instructions, input, images, runOptions, dashboardCorrelation)
-	if err != nil {
-		return Result{}, err
-	}
-	result.Text = text
-	result.addMetadata(metadata)
-	if effectivePromptGuard(agent.PromptGuard) != "" {
-		if err := checkPromptBlock(result); err != nil {
-			return result, err
+	if agent.Output == OutputText || agent.Output == OutputImageAfterText {
+		text, metadata, err := r.runText(ctx, llmClient, agent, instructions, input, images, runOptions)
+		if err != nil {
+			return Result{}, err
+		}
+		result.Text = text
+		result.addMetadata(metadata)
+		if effectivePromptGuard(agent.PromptGuard) != "" {
+			if err := checkPromptBlock(result); err != nil {
+				return result, err
+			}
+		}
+		if agent.Output == OutputImageAfterText {
+			input = text
+			instructions = ""
 		}
 	}
 
 	// run image with the generated text
-	if agent.Output == OutputImage {
-		image, response, err := r.runImage(ctx, agent, "", text, images, runOptions, dashboardCorrelation)
+	if agent.Output == OutputImage || agent.Output == OutputImageAfterText {
+		image, response, err := r.runImage(ctx, agent, instructions, input, images, runOptions)
 		if err != nil {
 			return Result{}, err
 		}
 		result.Images = []Image{image}
-		result.addMetadata(responseMetadataFromResponse(response, runOptions.PreviousResponseID, dashboardCorrelation))
+		result.addMetadata(responseMetadataFromResponse(response, runOptions.PreviousResponseID))
 	}
 	return result, nil
 }
@@ -387,9 +389,6 @@ func mergeAgentDefinition(explicit, frontmatter Agent) Agent {
 	if explicit.ReasoningEffort == "" || (isTemplateText(explicit.ReasoningEffort) && frontmatter.ReasoningEffort != "") {
 		explicit.ReasoningEffort = frontmatter.ReasoningEffort
 	}
-	if explicit.DashboardCorrelation == "" || (isTemplateText(explicit.DashboardCorrelation) && frontmatter.DashboardCorrelation != "") {
-		explicit.DashboardCorrelation = frontmatter.DashboardCorrelation
-	}
 	if len(explicit.ModelOptions) == 0 {
 		explicit.ModelOptions = frontmatter.ModelOptions
 	}
@@ -475,20 +474,19 @@ func parsePromptBundleInternal(source string, inputObject any, renderFrontmatter
 		decoder := yaml.NewDecoder(strings.NewReader(frontmatterText))
 		decoder.KnownFields(true)
 		var frontmatter struct {
-			PromptGuard          PromptGuard    `yaml:"prompt_guard"`
-			Key                  string         `yaml:"key"`
-			Name                 string         `yaml:"name"`
-			Version              string         `yaml:"version"`
-			Model                string         `yaml:"model"`
-			Provider             string         `yaml:"provider"`
-			Options              map[string]any `yaml:"options"`
-			ReasoningEffort      string         `yaml:"reasoning_effort"`
-			DashboardCorrelation string         `yaml:"dashboard_correlation"`
-			ModelOptions         []ModelOption  `yaml:"model_options"`
-			Tools                []Tool         `yaml:"tools"`
-			Output               OutputType     `yaml:"output"`
-			Image                ImageOptions   `yaml:"image"`
-			LoggingOptions       struct {
+			PromptGuard     PromptGuard    `yaml:"prompt_guard"`
+			Key             string         `yaml:"key"`
+			Name            string         `yaml:"name"`
+			Version         string         `yaml:"version"`
+			Model           string         `yaml:"model"`
+			Provider        string         `yaml:"provider"`
+			Options         map[string]any `yaml:"options"`
+			ReasoningEffort string         `yaml:"reasoning_effort"`
+			ModelOptions    []ModelOption  `yaml:"model_options"`
+			Tools           []Tool         `yaml:"tools"`
+			Output          OutputType     `yaml:"output"`
+			Image           ImageOptions   `yaml:"image"`
+			LoggingOptions  struct {
 				RunLog      bool   `yaml:"run_log"`
 				ContextLog  bool   `yaml:"context_log"`
 				ResponseLog bool   `yaml:"response_log"`
@@ -512,7 +510,7 @@ func parsePromptBundleInternal(source string, inputObject any, renderFrontmatter
 			metadata = Agent{
 				PromptGuard: frontmatter.PromptGuard,
 				Key:         frontmatter.Key, Name: frontmatter.Name, Version: frontmatter.Version,
-				Model: frontmatter.Model, Provider: frontmatter.Provider, Options: frontmatter.Options, ReasoningEffort: frontmatter.ReasoningEffort, DashboardCorrelation: frontmatter.DashboardCorrelation,
+				Model: frontmatter.Model, Provider: frontmatter.Provider, Options: frontmatter.Options, ReasoningEffort: frontmatter.ReasoningEffort,
 				ModelOptions: frontmatter.ModelOptions, Tools: frontmatter.Tools,
 				Output: frontmatter.Output, Image: frontmatter.Image,
 				LoggingOptions: LoggingOptions{
@@ -601,11 +599,11 @@ func (r *Result) addMetadata(metadata ResponseMetadata) {
 	r.Usage.TotalTokens += usage.TotalTokens
 }
 
-func responseMetadataFromResponse(response *responses.Response, previousResponseID, dashboardCorrelation string) ResponseMetadata {
+func responseMetadataFromResponse(response *responses.Response, previousResponseID string) ResponseMetadata {
 	if response == nil {
 		return ResponseMetadata{}
 	}
-	return ResponseMetadata{ID: response.ID, PreviousResponseID: previousResponseID, DashboardCorrelation: dashboardCorrelation, Usage: TokenUsage{InputTokens: response.Usage.InputTokens, CachedTokens: response.Usage.InputTokensDetails.CachedTokens, CacheWriteTokens: response.Usage.InputTokensDetails.CacheWriteTokens, OutputTokens: response.Usage.OutputTokens, TotalTokens: response.Usage.TotalTokens}}
+	return ResponseMetadata{ID: response.ID, PreviousResponseID: previousResponseID, Usage: TokenUsage{InputTokens: response.Usage.InputTokens, CachedTokens: response.Usage.InputTokensDetails.CachedTokens, CacheWriteTokens: response.Usage.InputTokensDetails.CacheWriteTokens, OutputTokens: response.Usage.OutputTokens, TotalTokens: response.Usage.TotalTokens}}
 }
 
 func renderAgentTemplate(name, source string, inputObject any) (string, error) {
@@ -620,7 +618,7 @@ func renderAgentTemplate(name, source string, inputObject any) (string, error) {
 	return strings.TrimSpace(rendered.String()), nil
 }
 
-func (r *Runner) runText(ctx context.Context, client *openai.Client, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (string, ResponseMetadata, error) {
+func (r *Runner) runText(ctx context.Context, client *openai.Client, agent Agent, instructions, input string, images []ImageInput, options RunOptions) (string, ResponseMetadata, error) {
 	mode := options.ConversationMode
 	if mode == "" {
 		mode = ConversationModeChatCompletions
@@ -632,7 +630,7 @@ func (r *Runner) runText(ctx context.Context, client *openai.Client, agent Agent
 		return "", ResponseMetadata{}, fmt.Errorf("unbekannter conversation mode %q", mode)
 	}
 	if mode == ConversationModeResponses {
-		return r.runTextResponses(ctx, client, agent, instructions, input, images, options, dashboardCorrelation)
+		return r.runTextResponses(ctx, client, agent, instructions, input, images, options)
 	}
 	if input == "" && len(images) == 0 {
 		return "", ResponseMetadata{}, errors.New("agent input ist leer")
@@ -650,13 +648,10 @@ func (r *Runner) runText(ctx context.Context, client *openai.Client, agent Agent
 	}
 	messages := []any{map[string]any{"role": "system", "content": instructions}, map[string]any{"role": "user", "content": content}}
 	request := map[string]any{"model": agent.Model, "messages": messages}
-	for key, value := range agent.Options {
-		request[key] = value
-	}
-	addChatRunOptions(request, agent, dashboardCorrelation)
 	if len(agent.Tools) > 0 {
 		request["tools"] = agent.Tools
 	}
+	addRequestOptions(request, agent.Options, options.RequestOptions)
 	body, err := json.Marshal(request)
 	if err != nil {
 		return "", ResponseMetadata{}, fmt.Errorf("agent request serialisieren: %w", err)
@@ -665,7 +660,7 @@ func (r *Runner) runText(ctx context.Context, client *openai.Client, agent Agent
 	if err := json.Unmarshal(body, &params); err != nil {
 		return "", ResponseMetadata{}, fmt.Errorf("agent request in SDK-parameter umwandeln: %w", err)
 	}
-	response, err := client.Chat.Completions.New(ctx, params)
+	response, err := client.Chat.Completions.New(ctx, params, option.WithRequestBody("application/json", body))
 	if err != nil {
 		return "", ResponseMetadata{}, fmt.Errorf("agent %q ausführen: %w", agent.Key, err)
 	}
@@ -677,10 +672,10 @@ func (r *Runner) runText(ctx context.Context, client *openai.Client, agent Agent
 		return "", ResponseMetadata{}, fmt.Errorf("agent %q lieferte keinen text", agent.Key)
 	}
 	usage := TokenUsage{InputTokens: response.Usage.PromptTokens, OutputTokens: response.Usage.CompletionTokens, TotalTokens: response.Usage.TotalTokens}
-	return text, ResponseMetadata{ID: response.ID, DashboardCorrelation: dashboardCorrelation, Usage: usage}, nil
+	return text, ResponseMetadata{ID: response.ID, Usage: usage}, nil
 }
 
-func (r *Runner) runTextResponses(ctx context.Context, client *openai.Client, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (string, ResponseMetadata, error) {
+func (r *Runner) runTextResponses(ctx context.Context, client *openai.Client, agent Agent, instructions, input string, images []ImageInput, options RunOptions) (string, ResponseMetadata, error) {
 	if input == "" && len(images) == 0 {
 		return "", ResponseMetadata{}, errors.New("agent input ist leer")
 	}
@@ -696,10 +691,11 @@ func (r *Runner) runTextResponses(ctx context.Context, client *openai.Client, ag
 		content = append(content, responses.ResponseInputContentUnionParam{OfInputImage: &responses.ResponseInputImageParam{Detail: responses.ResponseInputImageDetailAuto, ImageURL: openai.String(url)}})
 	}
 	request := map[string]any{"model": agent.Model, "instructions": instructions, "input": []any{map[string]any{"role": "user", "content": content}}, "store": false}
-	addRunOptions(request, options, agent, dashboardCorrelation)
+	addRunOptions(request, options)
 	if len(agent.Tools) > 0 {
 		request["tools"] = agent.Tools
 	}
+	addRequestOptions(request, agent.Options, options.RequestOptions)
 	body, err := json.Marshal(request)
 	if err != nil {
 		return "", ResponseMetadata{}, err
@@ -708,7 +704,7 @@ func (r *Runner) runTextResponses(ctx context.Context, client *openai.Client, ag
 	if err = json.Unmarshal(body, &params); err != nil {
 		return "", ResponseMetadata{}, err
 	}
-	response, err := client.Responses.New(ctx, params)
+	response, err := client.Responses.New(ctx, params, option.WithRequestBody("application/json", body))
 	if err != nil {
 		return "", ResponseMetadata{}, fmt.Errorf("agent %q ausführen: %w", agent.Key, err)
 	}
@@ -717,27 +713,10 @@ func (r *Runner) runTextResponses(ctx context.Context, client *openai.Client, ag
 		return "", ResponseMetadata{}, fmt.Errorf("agent %q lieferte keinen text", agent.Key)
 	}
 	usage := TokenUsage{InputTokens: response.Usage.InputTokens, CachedTokens: response.Usage.InputTokensDetails.CachedTokens, CacheWriteTokens: response.Usage.InputTokensDetails.CacheWriteTokens, OutputTokens: response.Usage.OutputTokens, TotalTokens: response.Usage.TotalTokens}
-	return text, ResponseMetadata{ID: response.ID, PreviousResponseID: options.PreviousResponseID, DashboardCorrelation: dashboardCorrelation, Usage: usage}, nil
+	return text, ResponseMetadata{ID: response.ID, PreviousResponseID: options.PreviousResponseID, Usage: usage}, nil
 }
 
-func addChatRunOptions(request map[string]any, agent Agent, dashboardCorrelation string) {
-	metadata := map[string]string{}
-	if agent.Key != "" {
-		metadata["agent_key"] = agent.Key
-	}
-	if agent.Version != "" {
-		metadata["agent_version"] = agent.Version
-	}
-	if dashboardCorrelation != "" {
-		metadata["dashboard_correlation"] = dashboardCorrelation
-		request["prompt_cache_key"] = dashboardCorrelation
-	}
-	if len(metadata) > 0 {
-		request["metadata"] = metadata
-	}
-}
-
-func (r *Runner) runImage(ctx context.Context, agent Agent, instructions, input string, images []ImageInput, options RunOptions, dashboardCorrelation string) (Image, *responses.Response, error) {
+func (r *Runner) runImage(ctx context.Context, agent Agent, instructions, input string, images []ImageInput, options RunOptions) (Image, *responses.Response, error) {
 	provider := agent.Image.Provider
 	if provider == "" {
 		provider = "openai"
@@ -754,7 +733,7 @@ func (r *Runner) runImage(ctx context.Context, agent Agent, instructions, input 
 	for k, v := range agent.Image.Options {
 		imageOptions[k] = v
 	}
-	image, metadata, err := imageProvider.GenerateImage(ctx, ImageProviderRequest{Prompt: prompt, Model: agent.Image.Model, Options: imageOptions, Agent: agent, Instructions: instructions, Input: input, Images: images, RunOptions: options, DashboardCorrelation: dashboardCorrelation, Client: r.client})
+	image, metadata, err := imageProvider.GenerateImage(ctx, ImageProviderRequest{Prompt: prompt, Model: agent.Image.Model, Options: imageOptions, Agent: agent, Instructions: instructions, Input: input, Images: images, RunOptions: options, Client: r.client})
 	if err != nil {
 		return Image{}, nil, err
 	}
@@ -762,50 +741,39 @@ func (r *Runner) runImage(ctx context.Context, agent Agent, instructions, input 
 	return image, response, nil
 }
 
-func addRunOptions(request map[string]any, options RunOptions, agent Agent, dashboardCorrelation string) {
-	if dashboardCorrelation != "" {
-		request["prompt_cache_key"] = dashboardCorrelation
-	}
-	metadata := make(map[string]string, len(options.Metadata)+3)
-	for key, value := range options.Metadata {
-		metadata[key] = value
-	}
-	// Keep SDK-owned classification fields authoritative if callers use the same keys.
-	if agent.Key != "" {
-		metadata["agent_key"] = agent.Key
-	}
-	if agent.Version != "" {
-		metadata["agent_version"] = agent.Version
-	}
-	if dashboardCorrelation != "" {
-		metadata["dashboard_correlation"] = dashboardCorrelation
-	}
-	if len(metadata) > 0 {
-		request["metadata"] = metadata
-	}
+func addRunOptions(request map[string]any, options RunOptions) {
 	if options.PreviousResponseID != "" {
 		request["previous_response_id"] = options.PreviousResponseID
 	}
 }
 
-func runMetadataJSON(agent Agent, options RunOptions, dashboardCorrelation string) string {
-	metadata := make(map[string]string, len(options.Metadata)+3)
-	for key, value := range options.Metadata {
-		metadata[key] = value
+func addRequestOptions(request map[string]any, defaults, overrides map[string]any) {
+	protected := make(map[string]bool, len(request)+1)
+	for key := range request {
+		protected[key] = true
 	}
+	protected["previous_response_id"] = true
+	for key, value := range defaults {
+		if !protected[key] {
+			request[key] = value
+		}
+	}
+	for key, value := range overrides {
+		if !protected[key] {
+			request[key] = value
+		}
+	}
+}
+
+func runMetadataJSON(agent Agent) string {
+	metadata := map[string]string{}
 	if agent.Key != "" {
 		metadata["agent_key"] = agent.Key
 	}
 	if agent.Version != "" {
 		metadata["agent_version"] = agent.Version
 	}
-	if dashboardCorrelation != "" {
-		metadata["dashboard_correlation"] = dashboardCorrelation
-	}
-	encoded, err := json.Marshal(metadata)
-	if err != nil {
-		return "{}"
-	}
+	encoded, _ := json.Marshal(metadata)
 	return string(encoded)
 }
 
@@ -841,49 +809,6 @@ func saveRunLog(ctx context.Context, logger RunLogger, record *RunLogRecord, res
 	if err := logger.SaveRun(ctx, *record); err != nil {
 		*runErr = errors.Join(*runErr, fmt.Errorf("agent run log speichern: %w", err))
 	}
-}
-
-func resolveDashboardCorrelation(agent Agent, inputObject any, options RunOptions) string {
-	if value := strings.TrimSpace(options.DashboardCorrelation); value != "" {
-		return value
-	}
-	if value := dashboardCorrelationFromInput(reflect.ValueOf(inputObject)); value != "" {
-		return value
-	}
-	if value := strings.TrimSpace(agent.DashboardCorrelation); value != "" {
-		return value
-	}
-	return strings.TrimSpace(agent.Key)
-}
-
-func dashboardCorrelationFromInput(value reflect.Value) string {
-	if !value.IsValid() {
-		return ""
-	}
-	if value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return ""
-		}
-		return dashboardCorrelationFromInput(value.Elem())
-	}
-	switch value.Kind() {
-	case reflect.Map:
-		keyType := value.Type().Key()
-		if keyType.Kind() != reflect.String {
-			return ""
-		}
-		key := reflect.ValueOf("DashboardCorrelation").Convert(keyType)
-		field := value.MapIndex(key)
-		if field.IsValid() && field.Kind() == reflect.String {
-			return strings.TrimSpace(field.String())
-		}
-	case reflect.Struct:
-		field := value.FieldByName("DashboardCorrelation")
-		if field.IsValid() && field.Kind() == reflect.String && field.CanInterface() {
-			return strings.TrimSpace(field.String())
-		}
-	}
-	return ""
 }
 
 func collectImages(value reflect.Value) []ImageInput {

@@ -52,7 +52,7 @@ result, err := runner.Run(ctx, myagents.BlogContent(), map[string]any{
 	"Audience": "B2B-Einkaufsteams",
 	"Goal":     "Themenideen für einen Fachblog",
 }, agents.RunOptions{
-	DashboardCorrelation: "blog-content:customer-123",
+	RequestOptions: map[string]any{"temperature": 0.7},
 	PreviousResponseID:  "resp_previous",
 	ModelOverride:       "gpt-5.6-terra",
 })
@@ -65,7 +65,7 @@ fmt.Println("tokens:", result.Usage.TotalTokens, "cached:", result.Usage.CachedT
 ```
 
 Vorlagen greifen direkt auf das Eingabeobjekt zu, zum Beispiel mit `{{.Topic}}`. Fehlende Template-Werte werden als Fehler gemeldet.
-`RunOptions` ist optional. Textläufe verwenden standardmäßig Chat Completions. Für eine Responses-Sitzung, auch beim ersten Aufruf ohne Response-ID, setze `ConversationMode: agents.ConversationModeResponses`; weitere Aufrufe können zusätzlich `PreviousResponseID` übergeben. Ist `PreviousResponseID` gesetzt, wird Responses automatisch gewählt. `DashboardCorrelation` wird standardmäßig aus `Agent.Key` abgeleitet. `ModelOverride` überschreibt das Sprachmodell. `Result` gibt IDs und Token-Nutzungsdaten zurück.
+`RunOptions` ist optional. Textläufe verwenden standardmäßig Chat Completions. Für eine Responses-Sitzung, auch beim ersten Aufruf ohne Response-ID, setze `ConversationMode: agents.ConversationModeResponses`; weitere Aufrufe können zusätzlich `PreviousResponseID` übergeben. Ist `PreviousResponseID` gesetzt, wird Responses automatisch gewählt. `RequestOptions` ergänzt anbieterspezifische Request-Felder und überschreibt gleichnamige Frontmatter-Optionen; vom Runner gesetzte Systemfelder bleiben geschützt. `ModelOverride` überschreibt das Sprachmodell. `Result` gibt IDs und Token-Nutzungsdaten zurück.
 
 ## Run-Logging
 
@@ -245,7 +245,7 @@ image := result.Images[0]
 
 ## Prompts aus Dateien einbetten
 
-`SystemPrompt`, `InputTemplate` und `OutputSchema` können inline, als getrennte Dateien oder gemeinsam aus einem Prompt-Bundle geladen werden. Ein YAML-Frontmatter zwischen `---`-Zeilen kann außerdem `key`, `name`, `version`, `model`, `dashboard_correlation`, `model_options`, `tools`, `output` und `image` setzen. Der Body trennt die drei Textfelder mit `'''system-prompt`, `'''input-template` und `'''output-schema`; jeder Abschnitt endet mit einer eigenen Zeile `'''`.
+`SystemPrompt`, `InputTemplate` und `OutputSchema` können inline, als getrennte Dateien oder gemeinsam aus einem Prompt-Bundle geladen werden. Ein YAML-Frontmatter zwischen `---`-Zeilen kann außerdem `key`, `name`, `version`, `model`, `options`, `model_options`, `tools`, `output` und `image` setzen. Der Body trennt die drei Textfelder mit `'''system-prompt`, `'''input-template` und `'''output-schema`; jeder Abschnitt endet mit einer eigenen Zeile `'''`.
 
 Das Frontmatter darf Go-Template-Ausdrücke und Kontrollblöcke enthalten; `ExportPromptBundle` erhält das Frontmatter-Template. Der `key` muss statisch bleiben und darf keinen Template-Code enthalten.
 
@@ -260,7 +260,6 @@ name: Produktillustration
 version: v1
 model: gpt-5.6-luna
 reasoning_effort: medium
-dashboard_correlation: product-illustration
 output: image
 image:
   model: gpt-image-2.5-flare

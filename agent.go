@@ -17,7 +17,6 @@ type Agent struct {
 	Provider              string         `yaml:"provider,omitempty"`
 	Options               map[string]any `yaml:"options,omitempty"`
 	ReasoningEffort       string
-	DashboardCorrelation  string
 	ModelOptions          []ModelOption
 	Tools                 []Tool
 	SystemPrompt          string
@@ -52,8 +51,9 @@ type PromptFiles struct {
 type OutputType string
 
 const (
-	OutputText  OutputType = "text"
-	OutputImage OutputType = "image"
+	OutputText           OutputType = "text"
+	OutputImage          OutputType = "image"
+	OutputImageAfterText OutputType = "image-after-text"
 )
 
 // ImageOptions configures image generation for agents with OutputImage or OutputBoth.
